@@ -107,7 +107,7 @@ def main(arguments):
     print('Vocab size:', C)
 
     print 'Saving...'
-    filename = args.dataset + '.hdf5'
+    filename = args.dataset + '_' + str(ngram_size) + '.hdf5'
     with h5py.File(filename, "w") as f:
         f['train_input'] = train_input
         f['train_output'] = train_output
