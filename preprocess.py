@@ -31,8 +31,11 @@ def convert_data(data_name, word_to_idx, ngram_size, dataset):
         for line in f:
             # Start of sentence padding
             features.extend([1] * (ngram_size - 1))
-            words = line.split(' ')
+            line = line.rstrip()
+            words = line.split()
             for word in words:
+                if len(word) == 0 or word[0] == '_':
+                    continue
                 features.append(word_to_idx[word])
             # End of sentence padding
             features.append(2)
@@ -57,9 +60,13 @@ def get_vocab(file_list, dataset=''):
         if filename:
             with codecs.open(filename, "r", encoding="latin-1") as f:
                 for line in f:
-                    words = line.split(' ')
+                    line = line.rstrip()
+                    words = line.split()
                     for word in words:
-                        if word not in word_to_idx:
+                        # skip blank words and test blanks
+                        if len(word) == 0 or word[0] == '_':
+                            continue
+                        elif word not in word_to_idx:
                             word_to_idx[word] = idx
                             idx += 1
     return word_to_idx
