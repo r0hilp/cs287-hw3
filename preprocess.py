@@ -8,7 +8,6 @@ import h5py
 import argparse
 import sys
 import re
-import codecs
 
 # Your preprocessing, features construction, and word2vec code.
 
@@ -27,7 +26,7 @@ def convert_data(data_name, word_to_idx, ngram_size, dataset):
     ngram_features = []
     ngram_lbls = []
 
-    with codecs.open(data_name, "r", encoding="latin-1") as f:
+    with open(data_name, "r") as f:
         for line in f:
             # Start of sentence padding
             features.extend([1] * (ngram_size - 1))
@@ -55,7 +54,7 @@ def get_vocab(file_list, dataset=''):
     idx = 3
     for filename in file_list:
         if filename:
-            with codecs.open(filename, "r", encoding="latin-1") as f:
+            with open(filename, "r") as f:
                 for line in f:
                     words = line.split(' ')
                     for word in words:
