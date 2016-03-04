@@ -45,7 +45,7 @@ def convert_text(data_name, word_to_idx, ngram_to_idx, ngram_size, dataset):
     ngram_features = []
     ngram_lbls = []
 
-    with codecs.open(data_name, "r", encoding="latin-1") as f:
+    with open(data_name, "r") as f:
         for line in f:
             line = line.rstrip()
             words = line.split()
