@@ -95,7 +95,10 @@ FILE_PATHS = {"PTB": ("data/train.txt",
                       "data/valid.txt",
                       "data/valid_blanks.txt",
                       "data/test_blanks.txt",
-                      "data/words.dict")}
+                      "data/words.dict"),
+              "PTB_small": ("data/train.1000.txt",
+                            "data/valid.1000.txt",
+                            None, None, "data/words.1000.dict")}
 args = {}
 
 def main(arguments):
@@ -127,7 +130,7 @@ def main(arguments):
     train_input, train_context, train_output = convert_text(train, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
 
     if valid:
-        valid_input, train_context, valid_output = convert_text(valid, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
+        valid_input, valid_context, valid_output = convert_text(valid, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
 
     if valid_blanks:
         valid_blanks_input, valid_blanks_output, valid_blanks_queries, valid_blanks_context = convert_blanks(valid_blanks, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
