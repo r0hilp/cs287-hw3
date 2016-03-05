@@ -3,13 +3,15 @@ require("hdf5")
 require("nn")
 require("optim")
 
+PAD = 3 -- padding index
+
 cmd = torch.CmdLine()
 
 -- Cmd Args
 cmd:option('-datafile', '', 'data file')
 cmd:option('-action', 'train', 'train or test')
 cmd:option('-smoothing', '', 'smoothing method')
-cmd:option('-lm', 'mle', 'classifier to use')
+cmd:option('-lm', 'mle', 'classifier to use: mle, laplace, NNLM')
 
 cmd:option('-window_size', 5, 'window size')
 cmd:option('-warm_start', '', 'torch file with previous model')
@@ -26,6 +28,7 @@ cmd:option('-L2s', 1, 'normalize L2 of word embeddings')
 
 cmd:option('-embed', 50, 'size of word embeddings')
 cmd:option('-hidden', 100, 'size of hidden layer for neural network')
+cmd:option('-skip_connect', 1, 'use skip connections in NNLM')
 
 function make_count_matrix(X, Y, nclasses)
   -- Construct count matrix
@@ -85,13 +88,28 @@ function NNLM()
   local word_embed = nn.LookupTable(nfeatures, opt.embed)
   word_embed.weight[1]:zero()
   model:add(word_embed)
-  model:add(nn.View(opt.embed * window_size)) -- concat
+  local view = nn.View(opt.embed * window_size)
+  model:add(view) -- concat
 
-  model:add(nn.Linear(opt.embed * window_size, opt.hidden))
-  model:add(nn.Tanh())
-  model:add(nn.Linear(opt.hidden, nclasses))
-  model:add(nn.LogSoftMax())
-  -- skip connections?
+  local lin1 = nn.Sequential()
+  lin1:add(nn.Linear(opt.embed * window_size, opt.hidden))
+  lin1:add(nn.Tanh())
+  
+  if opt.skip_connect == 1 then
+    -- skip connections
+    local skip = nn.ParallelTable()
+    skip:add(lin1)
+    skip:add(view)
+    model:add(skip)
+    model:add(nn.JoinTable(2)) -- 2 for batch
+    model:add(nn.Linear(opt.hidden + opt.embed * window_size, nclasses))
+  else
+    model:add(lin1)
+    model:add(nn.Linear(opt.hidden, nclasses))
+  end
+
+  --model:add(nn.LogSoftMax())
+  -- no softmax here for compatibility with NCE
   return model
 end
 
@@ -100,10 +118,7 @@ function compute_err(Y, pred)
   local _, argmax = torch.max(pred, 2)
   argmax:squeeze()
 
-  local correct
-  if Y then
-    correct = argmax:eq(Y):sum()
-  end
+  local correct = argmax:eq(Y):sum()
   return argmax, correct
 end
 
@@ -134,13 +149,14 @@ function model_eval(model, criterion, X, Y)
     return total_loss / N, total_correct / N
 end
 
-function train_model(X, Y, valid_X, valid_Y, word_vecs)
+function train_model(X, Y, valid_X, valid_Y)
   local eta = opt.eta
   local batch_size = opt.batch_size
   local max_epochs = opt.max_epochs
   local N = X:size(1)
 
   local model = NNLM()
+  model:add(nn.LogSoftMax())
   local criterion = nn.ClassNLLCriterion()
 
   -- only call this once
@@ -244,26 +260,29 @@ function main()
    opt = cmd:parse(arg)
    local f = hdf5.open(opt.datafile, 'r')
    local X = f:read('train_input'):all():long()
+   local X_context = f:read('train_context'):all():long()
    local Y = f:read('train_output'):all():long()
    local valid_X = f:read('valid_input'):all():long()
+   local valid_X_context = f:read('valid_context'):all():long()
    local valid_Y = f:read('valid_output'):all():long()
    local test_X = f:read('test_input'):all():long()
    nclasses = f:read('nclasses'):all():long()[1]
-   window_size = 5
-
-   -- local W = torch.DoubleTensor(nclasses, nfeatures)
-   -- local b = torch.DoubleTensor(nclasses)
+   nfeatures = f:read('nfeatures'):all():long()[1]
+   window_size = f:read('context_size'):all():long()[1]
 
 
    -- Train.
    if opt.action == 'train' then
      print('Training...')
-     CM = make_count_matrix(X, Y, nclasses)
      if opt.lm == 'mle' then
+       CM = make_count_matrix(X, Y, nclasses)
        preds = mle_preds(X, CM, nclasses) 
      elseif opt.lm == 'laplace' then
        alpha = opt.alpha
+       CM = make_count_matrix(X, Y, nclasses)
        preds = laplace_preds(X, CM, alpha, nclasses)
+     elseif opt.lm == 'NNLM' then
+       train_model(X_context, Y, valid_X_context, valid_Y)
      end
    end 
 
