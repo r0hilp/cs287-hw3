@@ -211,12 +211,9 @@ function predict_witten_bell(X, bigram_CM, trigram_CM, queries)
   return preds
 end
 
-function perplexity(preds)
-  local perp = torch.zeros(preds:size(1), 1)
-  for i = 1, preds:size(1) do
-    perp[i] = math.exp(preds[i]:log():mul(-1):mean())
-  end
-  return perp
+function perplexity(preds, Y)
+  local nll = nn.ClassNLLCriterion():forward(preds:log(), Y)
+  return torch.exp(nll)
 end
 
 function NNLM()
@@ -651,7 +648,7 @@ function main()
        alpha = opt.alpha
        CM = make_count_matrix(X, Y)
        preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, alpha) 
-       print(perplexity(preds):mean())
+       print(perplexity(preds, valid_blanks_index))
      elseif opt.lm == 'NNLM' then
        train_model(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
      elseif opt.lm == 'NCE' then
