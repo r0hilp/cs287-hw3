@@ -49,39 +49,39 @@ function tblsum(T)
   return value
 end
 
-function hash(context, nclasses)
+function hash(context)
   -- Hashes ngram context for 
   local total = 0
   for i = 1, context:size(1) do
-    total = total + (context[i] - 1) * (nclasses ^ (i-1))
+    total = total + (context[i] - 1) * (vocab_size ^ (i-1))
   end
   return total
 end
 
-function unhash(X_idx, nclasses, ngram_size)
+function unhash(X_idx)
   -- Converts index to ngram context
   local X = torch.zeros(X_idx:size(1), ngram_size - 1)
   for i = 1, X:size(1) do
-      idx = X_idx[i][1]
+      local idx = X_idx[i][1]
     for j = 1, ngram_size - 1 do
-      X[i][j] = math.mod(idx, nclasses) + 1
-      idx = (idx - context[i]) / nclasses
+      X[i][j] = math.mod(idx, vocab_size) + 1
+      local idx = (idx - context[i]) / vocab_size
     end
   end
   return X
 end
 
-function make_count_matrix(X, Y, nclasses)
+function make_count_matrix(X, Y)
   -- Construct count matrix
   local CM = {}
   for i = 1, X:size(1) do
-    prefix = hash(X[i], nclasses)
+    local prefix = hash(X[i])
     if CM[prefix] == nil then
       CM[prefix] = {}
-      word = Y[i]
+      local word = Y[i]
       CM[prefix][word] = 1
     else
-      word = Y[i]
+      local word = Y[i]
       if CM[prefix][word] == nil then
         CM[prefix][word] = 1
       else
@@ -101,7 +101,7 @@ function predict_laplace(X, CM, queries, alpha)
   -- Predict distribution of the word following X[i] over queries[i]
   local preds = torch.zeros(X:size(1), queries:size(2)) 
   for i = 1, X:size(1) do
-    prefix = hash(X[i], nclasses)
+    local prefix = hash(X[i])
     -- Return uniform distribution if nil
     if CM[prefix] == nil then
       preds[i]:fill(1/queries:size(2))
@@ -124,7 +124,7 @@ function predict_laplace(X, CM, queries, alpha)
   return preds
 end
 
-function predict_witten_bell(X, bigram_CM, trigram_CM, nclasses, queries)
+function predict_witten_bell(X, bigram_CM, trigram_CM, queries)
   -- Predict distribution of the word following X[i] over queries[i]
   local preds = torch.zeroes(X:size(1), queries:size(2))
   local ngram_size = X:size(2) + 1 
@@ -142,7 +142,7 @@ function predict_witten_bell(X, bigram_CM, trigram_CM, nclasses, queries)
     end
     total_unigram_count = tblsum(unigram_CM)
     for i = 1, X:size(1) do
-      prefix = hash(X[i], nclasses)
+      prefix = hash(X[i])
       if bigram_CM[prefix] == nil then
         preds[i]:fill(1/queries:size(2))
       else
@@ -172,8 +172,8 @@ function predict_witten_bell(X, bigram_CM, trigram_CM, nclasses, queries)
     end
   elseif ngram_size == 3 then
     for i = 1, X:size(1) do
-      trigram_prefix = hash(X[i], nclasses)
-      bigram_prefix = math.mod(trigram_prefix, nclasses^2)
+      trigram_prefix = hash(X[i])
+      bigram_prefix = math.mod(trigram_prefix, vocab_size^2)
       if trigram_CM[trigram_prefix] == nil then
         preds[i]:fill(1/queries:size(2))
       else
@@ -645,11 +645,11 @@ function main()
      print('Training...')
      if opt.lm == 'mle' then
        print(X:size(1), X:size(2))
-       CM = make_count_matrix(X, Y, nclasses)
+       CM = make_count_matrix(X, Y)
        preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, 0) 
      elseif opt.lm == 'laplace' then
        alpha = opt.alpha
-       CM = make_count_matrix(X, Y, nclasses)
+       CM = make_count_matrix(X, Y)
        preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, alpha) 
        print(perplexity(preds):mean())
      elseif opt.lm == 'NNLM' then
