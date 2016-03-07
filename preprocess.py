@@ -118,13 +118,13 @@ def main(arguments):
         valid_input, valid_context, valid_output = convert_text(valid, word_to_idx, ngram_size, dataset, context_size)
 
     if valid_blanks:
-        valid_blanks_input, valid_blanks_output, valid_blanks_queries, valid_blanks_context, valid_blanks_index = convert_blanks(valid_blanks, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
+        valid_blanks_input, valid_blanks_output, valid_blanks_queries, valid_blanks_context, valid_blanks_index = convert_blanks(valid_blanks, word_to_idx, ngram_size, dataset, context_size)
 
     if test_blanks:
-        test_blanks_input, _, test_blanks_queries, test_blanks_context, _ = convert_blanks(test_blanks, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
+        test_blanks_input, _, test_blanks_queries, test_blanks_context, _ = convert_blanks(test_blanks, word_to_idx, ngram_size, dataset, context_size)
 
-    num_ngrams = len(ngram_to_idx)
-    print('# of ngrams:', num_ngrams)
+    # num_ngrams = len(ngram_to_idx)
+    # print('# of ngrams:', num_ngrams)
 
     vocab_size = len(word_to_idx)
     print('# of unigrams:', vocab_size)
@@ -149,8 +149,7 @@ def main(arguments):
             f['test_blanks_input'] = test_blanks_input
             f['test_blanks_queries'] = test_blanks_queries
             f['test_blanks_context'] = test_blanks_context
-            f['test_blanks_index'] = test_blanks_index
-        f['ngrams_size'] = np.array([num_ngrams], dtype=np.int32)
+        # f['ngrams_size'] = np.array([num_ngrams], dtype=np.int32)
         f['vocab_size'] = np.array([vocab_size], dtype=np.int32)
         f['context_size'] = np.array([context_size], dtype=np.int32)
 

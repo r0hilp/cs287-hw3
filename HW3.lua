@@ -623,14 +623,18 @@ function main()
    local valid_Y = f:read('valid_output'):all():long()
    local valid_X_context = f:read('valid_context'):all():long()
 
-   local valid_X_blanks = f:read('valid_blanks_input'):all():long()
-   local valid_X_blanks_context = f:read('valid_blanks_context'):all():long()
-   local valid_X_queries = f:read('valid_blanks_queries'):all():long()
+   local valid_blanks_X, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index
+   if opt.has_blanks == 1 then
+     valid_blanks_X  = f:read('valid_blanks_input'):all():long()
+     valid_blanks_X_context = f:read('valid_blanks_context'):all():long()
+     valid_blanks_Q = f:read('valid_blanks_queries'):all():long()
+     valid_blanks_Y = f:read('valid_blanks_index'):all():long()
+     valid_blanks_index = f:read('valid_blanks_index'):all():long()
 
-   local test_X = f:read('test_blanks_input'):all():long()
-   local test_X_queries = f:read('test_blanks_queries'):all():long()
-   local test_X_context = f:read('test_blanks_context'):all():long()
-   ngrams_size = f:read('ngrams_size'):all():long()[1]
+     --local test_X = f:read('test_blanks_input'):all():long()
+     --local test_X_queries = f:read('test_blanks_queries'):all():long()
+     --local test_X_context = f:read('test_blanks_context'):all():long()
+   end
    vocab_size = f:read('vocab_size'):all():long()[1]
    window_size = f:read('context_size'):all():long()[1]
 
@@ -642,16 +646,16 @@ function main()
      if opt.lm == 'mle' then
        print(X:size(1), X:size(2))
        CM = make_count_matrix(X, Y, nclasses)
-       preds = predict_laplace(valid_X_blanks, CM, valid_X_queries, 0) 
+       preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, 0) 
      elseif opt.lm == 'laplace' then
        alpha = opt.alpha
        CM = make_count_matrix(X, Y, nclasses)
-       preds = predict_laplace(valid_X_blanks, CM, valid_X_queries, alpha) 
+       preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, alpha) 
        print(perplexity(preds):mean())
      elseif opt.lm == 'NNLM' then
        train_model(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
      elseif opt.lm == 'NCE' then
-       train_model_NCE(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y)
+       train_model_NCE(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
      end
    end 
 
