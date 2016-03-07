@@ -247,6 +247,7 @@ function NNLM()
 end
 
 function NCE_LM(unigram_p)
+  -- unigram_p is log probs
   -- input: {{context, output word}, output_word, output_word}
   if opt.warm_start ~= '' then
     return torch.load(opt.warm_start).model
@@ -281,9 +282,8 @@ function NCE_LM(unigram_p)
   local noise = nn.Sequential()
   local lookup_ml = nn.LookupTable(vocab_size, 1)
   lookup_ml.weight = unigram_p:clone()
-  lookup_ml.weight:mul(opt.K_noise)
+  lookup_ml.weight:add(torch.log(opt.K_noise))
   noise:add(lookup_ml)
-  noise:add(nn.Log())
   noise:add(nn.MulConstant(-1))
   parallel:add(noise)
 
@@ -371,13 +371,22 @@ function model_eval_NCE(model, X, Y, X_Q, Y_index)
         if batch + batch_size > N then
           sz = N - batch + 1
         end
-        local X_batch = X:narrow(1, batch, sz):double()
-        local Y_batch = Y:narrow(1, batch, sz):double()
+        local X_batch = X:narrow(1, batch, sz)
 
         local scores = real_model:forward(X_batch)
-        local outputs = nn.LogSoftMax():forward(scores)
-        local loss = criterion:forward(outputs, Y_batch)
+        if X_Q then
+          local X_Q_batch = X_Q:narrow(1, batch, sz)
+          outputs = torch.Tensor(sz, X_Q:size(2))
+          for i = 1, sz do
+            outputs[i] = nn.LogSoftMax():forward(scores[i]:index(1, X_Q_batch[i]))
+          end
+          Y_batch = Y_index:narrow(1, batch, sz)
+        else
+          outputs = nn.LogSoftMax():forward(scores)
+          Y_batch = Y:narrow(1, batch, sz)
+        end
 
+        local loss = criterion:forward(outputs, Y_batch)
         total_loss = total_loss + loss * batch_size
     end
 
@@ -496,13 +505,13 @@ function train_model(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q, val
 end
 
 -- NCE training
-function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
+function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q, valid_blanks_Y, valid_blanks_index, unigram_p)
   local eta = opt.eta
   local batch_size = opt.batch_size
   local max_epochs = opt.max_epochs
   local N = X:size(1)
 
-  local model = NCE_LM(torch.rand(vocab_size)) -- should pass unigram weights
+  local model = NCE_LM(unigram_p) -- pass log unigram p
   local criterion = nn.BCECriterion()
 
   -- only call this once
@@ -553,13 +562,15 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
 
               -- I need to: sample K_noise unigram guys. Append the words to Y_batch. Add K_noise 0's (per guy in the batch) as the gold for criterion
               -- D_noise will indicate if noise or not.
-              local D_noise = torch.ones(Y_batch:size(1)):double()
+              local K = opt.K_noise
+              local D_noise = torch.cat(torch.ones(sz), torch.zeros(K * sz))
+              local X_batch = torch.repeatTensor(X_batch, K+1, 1)
+              local samples = torch.multinomial(torch.exp(unigram_p), K*sz, true):double()
+              local Y_batch = torch.cat(Y_batch, samples)
 
               -- forward
               local inputs = {{X_batch, Y_batch}, Y_batch, Y_batch}
               local NCE_val = model:forward(inputs)
-              --print(NCE_val)
-              --io.read()
               local loss = criterion:forward(NCE_val, D_noise)
 
               -- track errors
@@ -569,7 +580,8 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
               local df_do = criterion:backward(NCE_val, D_noise)
               model:backward(inputs, df_do)
 
-              -- TODO: zero out unigram ML grads
+              -- zero out unigram ML grads
+              model:get(1):get(3):get(1).gradWeight:zero()
 
               return loss, grads
           end
@@ -582,7 +594,7 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
               local n = row:norm()
               row:mul(opt.L2s):div(1e-7 + n)
             end
-            local w = model:get(1).weight
+            local w = model:get(1):get(1):get(1):get(1):get(1).weight
             for j = 1, w:size(1) do
               renorm(w[j])
             end
@@ -591,9 +603,12 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
 
       print('Train loss:', total_loss / N)
 
-      local loss = model_eval_NCE(model, valid_X, valid_Y, valid_blanks_Q, valid_blanks_index)
+      if opt.has_blanks == 1 then
+        local blanks_loss = model_eval_NCE(model, valid_blanks_X, valid_blanks_Y, valid_blanks_Q, valid_blanks_index)
+        print('Valid blanks perplexity:', torch.exp(blanks_loss))
+      end
+      local loss = model_eval_NCE(model, valid_X, valid_Y)
       print('Valid perplexity:', torch.exp(loss))
-      --local blanks_loss = model_eval(model, criterion, valid_blanks_X, valid_blanks_Y, valid_blanks_Q)
 
       print('time for one epoch: ', (timer:time().real - epoch_time) * 1000, 'ms')
       print('')
@@ -652,7 +667,13 @@ function main()
      elseif opt.lm == 'NNLM' then
        train_model(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
      elseif opt.lm == 'NCE' then
-       train_model_NCE(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
+       local unigram_p = torch.Tensor(vocab_size):fill(opt.alpha)
+       for i = 1, Y:size(1) do
+         unigram_p[Y[i]] = unigram_p[Y[i]] + 1
+       end
+       unigram_p:log()
+
+       train_model_NCE(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index, unigram_p)
      end
    end 
 
