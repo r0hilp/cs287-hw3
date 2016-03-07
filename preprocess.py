@@ -66,6 +66,7 @@ def convert_blanks(data_name, word_to_idx, ngram_to_idx, ngram_size, dataset, co
     ngram_lbls = []
     ngram_queries = []
     ngram_context = []
+    ngram_index = []
 
     padding = max(ngram_size - 1, context_size)
     with open(data_name, "r") as f:
@@ -83,13 +84,18 @@ def convert_blanks(data_name, word_to_idx, ngram_to_idx, ngram_size, dataset, co
                 context = [word_to_idx[word] for word in words[-(context_size+1):-1]]
                 ngram_features.append(ngram_to_idx[tuple(ngram_prefix)])
                 ngram_context.append(context)
-                ngram_suffix = ngram[-1:][0]
-                if ngram_suffix in word_to_idx:
+
+                # True word.
+                word = ngram[-1]
+                if word in word_to_idx:
                     ngram_lbls.append(word_to_idx[word])
+                    # Get correct word index in query
+                    ngram_index.append(ngram_queries[-1].index(word_to_idx[word]) + 1)
                 else:
                     ngram_lbls.append(0)
+                    ngram_index.append(0)
 
-    return np.array(ngram_features, dtype=np.int32), np.array(ngram_lbls, dtype=np.int32), np.array(ngram_queries, dtype=np.int32), np.array(ngram_context, dtype=np.int32)
+    return np.array(ngram_features, dtype=np.int32), np.array(ngram_lbls, dtype=np.int32), np.array(ngram_queries, dtype=np.int32), np.array(ngram_context, dtype=np.int32), np.array(ngram_index, dtype=np.int32)
 
 FILE_PATHS = {"PTB": ("data/train.txt",
                       "data/valid.txt",
@@ -98,7 +104,10 @@ FILE_PATHS = {"PTB": ("data/train.txt",
                       "data/words.dict"),
               "PTB_small": ("data/train.1000.txt",
                             "data/valid.1000.txt",
-                            None, None, "data/words.1000.dict")}
+                            None, None,
+                            "data/words.1000.dict"),
+              "PTB_tiny": ("data/tiny.train", "data/tiny.valid",
+                           "data/tiny.valid.blanks", None, "data/words.dict")}
 args = {}
 
 def main(arguments):
@@ -133,16 +142,16 @@ def main(arguments):
         valid_input, valid_context, valid_output = convert_text(valid, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
 
     if valid_blanks:
-        valid_blanks_input, valid_blanks_output, valid_blanks_queries, valid_blanks_context = convert_blanks(valid_blanks, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
+        valid_blanks_input, valid_blanks_output, valid_blanks_queries, valid_blanks_context, valid_blanks_index = convert_blanks(valid_blanks, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
 
     if test_blanks:
-        test_blanks_input, _, test_blanks_queries, test_blanks_context = convert_blanks(test_blanks, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
+        test_blanks_input, _, test_blanks_queries, test_blanks_context, _ = convert_blanks(test_blanks, word_to_idx, ngram_to_idx, ngram_size, dataset, context_size)
 
-    V = len(ngram_to_idx)
-    print('# of ngrams:', V)
+    num_ngrams = len(ngram_to_idx)
+    print('# of ngrams:', num_ngrams)
 
-    C = len(word_to_idx)
-    print('# of unigrams:', C)
+    vocab_size = len(word_to_idx)
+    print('# of unigrams:', vocab_size)
 
     print 'Saving...'
     filename = args.dataset + '_' + str(ngram_size) + '.hdf5'
@@ -159,12 +168,14 @@ def main(arguments):
             f['valid_blanks_output'] = valid_blanks_output
             f['valid_blanks_queries'] = valid_blanks_queries
             f['valid_blanks_context'] = valid_blanks_context
+            f['valid_blanks_index'] = valid_blanks_index
         if test_blanks:
             f['test_blanks_input'] = test_blanks_input
             f['test_blanks_queries'] = test_blanks_queries
             f['test_blanks_context'] = test_blanks_context
-        f['nfeatures'] = np.array([V], dtype=np.int32)
-        f['nclasses'] = np.array([C], dtype=np.int32)
+            f['test_blanks_index'] = test_blanks_index
+        f['ngrams_size'] = np.array([num_ngrams], dtype=np.int32)
+        f['vocab_size'] = np.array([vocab_size], dtype=np.int32)
         f['context_size'] = np.array([context_size], dtype=np.int32)
 
 
