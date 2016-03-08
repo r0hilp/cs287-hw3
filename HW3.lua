@@ -639,6 +639,7 @@ function main()
    local valid_X_context = f:read('valid_context'):all():long()
 
    local valid_blanks_X, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index
+   local test_X, test_X_queries, test_X_context
    if opt.has_blanks == 1 then
      valid_blanks_X  = f:read('valid_blanks_input'):all():long()
      valid_blanks_X_context = f:read('valid_blanks_context'):all():long()
@@ -646,9 +647,9 @@ function main()
      valid_blanks_Y = f:read('valid_blanks_index'):all():long()
      valid_blanks_index = f:read('valid_blanks_index'):all():long()
 
-     local test_X = f:read('test_blanks_input'):all():long()
-     local test_X_queries = f:read('test_blanks_queries'):all():long()
-     local test_X_context = f:read('test_blanks_context'):all():long()
+     test_X = f:read('test_blanks_input'):all():long()
+     test_X_queries = f:read('test_blanks_queries'):all():long()
+     test_X_context = f:read('test_blanks_context'):all():long()
    end
    vocab_size = f:read('vocab_size'):all():long()[1]
    window_size = f:read('context_size'):all():long()[1]
@@ -693,31 +694,33 @@ function main()
    if opt.action == 'test' then
      print('Testing...')
      test_model = torch.load(opt.test_model).model
-     local scores = test_model:forward(test_X)
-     local preds = torch.Tensor(test_X:size(1), test_X_queries:size(2))
+     local logsoftmax = nn.LogSoftMax()
+     local scores = logsoftmax:forward(test_model:forward(test_X_context))
+     scores = scores:exp()
+     scores = scores:double()
+     local preds = torch.Tensor(test_X_context:size(1), test_X_queries:size(2))
      f = io.open('PTB_pred.test', 'w')
      local out = {"ID"}
-     for i in 1, test_X_queries:size(2) do
+     for i = 1, test_X_queries:size(2) do
         table.insert(out, "Class"..i)
      end
-     table.insert(out, '\n')
      f:write(table.concat(out, ","))
-     for i in 1, test_X:size(1) do
+     f:write("\n")
+     for i = 1, test_X_context:size(1) do
         out = {i}
-        preds[i] = scores[i]:index(test_X_queries[i])
+        preds[i] = scores[i]:index(1, test_X_queries[i])
         -- renormalize
-        sum = preds[i]:sum()
-        if sum == 0 then
-          preds[i]:fill(1/test_X_queries:size(2))
-        else
-          preds[i]:div(sum)
-        end
-        str = i .. 
-        for j in 1, test_X_queries:size(2) do
+        --sum = preds[i]:sum()
+        --if sum == 0 then
+          --preds[i]:fill(1/test_X_queries:size(2))
+        --else
+          --preds[i]:div(sum)
+        --end
+        for j = 1, test_X_queries:size(2) do
           table.insert(out, preds[i][j])
         end
-        table.insert(out, '\n')
         f:write(table.concat(out, ","))
+        f:write("\n")
      end
    end
 end
