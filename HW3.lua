@@ -246,63 +246,15 @@ function NNLM()
   return model
 end
 
-function NCE_LM(unigram_p)
-  -- unigram_p is log probs
-  -- input: {{context, output word}, output_word, output_word}
-  if opt.warm_start ~= '' then
-    return torch.load(opt.warm_start).model
-  end
-
+function NCE_hid()
   local model = nn.Sequential()
-  local parallel = nn.ParallelTable()
-
-  local to_dot = nn.ParallelTable()
-  local dot = nn.Sequential()
-
-  -- compute hidden layer from context, and dot with output embed
-  local hid = nn.Sequential()
-  hid:add(nn.LookupTable(vocab_size, opt.embed))
-  hid:add(nn.View(opt.embed * window_size)) -- concat
-  hid:add(nn.Linear(opt.embed * window_size, opt.hidden))
-  hid:add(nn.Tanh())
-  to_dot:add(hid)
-  to_dot:add(nn.LookupTable(vocab_size, opt.hidden))
-  dot:add(to_dot)
-  dot:add(nn.CMulTable())
-  dot:add(nn.Sum(2)) -- 2 for batch
-  parallel:add(dot)
-
-  -- bias embedding
-  local bias = nn.Sequential()
-  bias:add(nn.LookupTable(vocab_size, 1))
-  bias:add(nn.Squeeze())
-  parallel:add(bias)
-
-  -- noise will compute K * p_ML(w)
-  local noise = nn.Sequential()
-  local lookup_ml = nn.LookupTable(vocab_size, 1)
-  lookup_ml.weight = unigram_p:clone()
-  lookup_ml.weight:add(torch.log(opt.K_noise))
-  noise:add(lookup_ml)
-  noise:add(nn.MulConstant(-1))
-  parallel:add(noise)
-
-  -- combine score and noise terms
-  model:add(parallel)
-  model:add(nn.CAddTable())
-  model:add(nn.Sigmoid())
+  
+  model:add(nn.LookupTable(vocab_size, opt.embed))
+  model:add(nn.View(opt.embed * window_size)) -- concat
+  model:add(nn.Linear(opt.embed * window_size, opt.hidden))
+  model:add(nn.Tanh())
 
   return model
-end
-
--- not sure how to use Q yet!!!
-function compute_err(Y, pred, X_Q)
-  -- Compute error from Y
-  local _, argmax = torch.max(pred, 2)
-  argmax:squeeze()
-
-  local correct = argmax:eq(Y:long()):sum()
-  return argmax, correct
 end
 
 function model_eval(model, criterion, X, Y, X_Q, Y_index)
@@ -341,57 +293,6 @@ function model_eval(model, criterion, X, Y, X_Q, Y_index)
     return total_loss / N
 end
 
-function model_eval_NCE(model, X, Y, X_Q, Y_index)
-    -- batch eval
-    local N = X:size(1)
-    local batch_size = opt.batch_size
-
-    -- get output word embeddings
-    local embeds = model:get(1):get(1):get(1):get(2)
-    local bias = model:get(1):get(2):get(1)
-    local W = embeds.weight:clone()
-    local b = bias.weight:clone()
-    
-    -- build full model
-    local hid_model = model:get(1):get(1):get(1):get(1)
-    local lin = nn.Linear(opt.hidden, vocab_size)
-    lin.weight = W
-    lin.bias = b:squeeze()
-
-    local real_model = nn.Sequential()
-    real_model:add(hid_model)
-    real_model:add(lin)
-    real_model:evaluate()
-
-    local criterion = nn.ClassNLLCriterion()
-
-    local total_loss = 0
-    for batch = 1, X:size(1), batch_size do
-        local sz = batch_size
-        if batch + batch_size > N then
-          sz = N - batch + 1
-        end
-        local X_batch = X:narrow(1, batch, sz)
-
-        local scores = real_model:forward(X_batch)
-        if X_Q then
-          local X_Q_batch = X_Q:narrow(1, batch, sz)
-          outputs = torch.Tensor(sz, X_Q:size(2))
-          for i = 1, sz do
-            outputs[i] = nn.LogSoftMax():forward(scores[i]:index(1, X_Q_batch[i]))
-          end
-          Y_batch = Y_index:narrow(1, batch, sz)
-        else
-          outputs = nn.LogSoftMax():forward(scores)
-          Y_batch = Y:narrow(1, batch, sz)
-        end
-
-        local loss = criterion:forward(outputs, Y_batch)
-        total_loss = total_loss + loss * batch_size
-    end
-
-    return total_loss / N
-end
 
 function train_model(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
   local eta = opt.eta
@@ -431,6 +332,8 @@ function train_model(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q, val
               print('Sample:', batch)
               print('Current train loss:', total_loss / batch)
               print('Current time:', 1000 * (timer:time().real - epoch_time), 'ms')
+              local blanks_loss = model_eval(model, criterion, valid_blanks_X, valid_blanks_Y, valid_blanks_Q, valid_blanks_index)
+              print('Valid blanks perplexity:', torch.exp(blanks_loss))
             end
           end
           local sz = batch_size
@@ -470,14 +373,8 @@ function train_model(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q, val
 
           -- normalize weights
           if opt.L2s > 0 then
-            local renorm = function(row)
-              local n = row:norm()
-              row:mul(opt.L2s):div(1e-7 + n)
-            end
             local w = model:get(1).weight
-            for j = 1, w:size(1) do
-              renorm(w[j])
-            end
+            w:renorm(2, 2, opt.L2s)
           end
       end
 
@@ -504,21 +401,80 @@ function train_model(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q, val
   return model, prev_loss
 end
 
+function model_eval_NCE(hid_model, W, b, X, Y, X_Q, Y_index)
+    -- batch eval
+    local N = X:size(1)
+    local batch_size = opt.batch_size
+    
+    -- build full model
+    local lin = nn.Linear(opt.hidden, vocab_size)
+    lin.weight = W
+    lin.bias = b:squeeze()
+
+    local real_model = nn.Sequential()
+    real_model:add(hid_model)
+    real_model:add(lin)
+
+    local criterion = nn.ClassNLLCriterion()
+
+    local total_loss = 0
+    for batch = 1, X:size(1), batch_size do
+        local sz = batch_size
+        if batch + batch_size > N then
+          sz = N - batch + 1
+        end
+        local X_batch = X:narrow(1, batch, sz)
+
+        local Y_batch
+        local scores = real_model:forward(X_batch)
+        local outputs
+        if X_Q then
+          local X_Q_batch = X_Q:narrow(1, batch, sz)
+          outputs = torch.Tensor(sz, X_Q:size(2))
+          for i = 1, sz do
+            outputs[i] = nn.LogSoftMax():forward(scores[i]:index(1, X_Q_batch[i]))
+          end
+          Y_batch = Y_index:narrow(1, batch, sz)
+        else
+          outputs = nn.LogSoftMax():forward(scores)
+          Y_batch = Y:narrow(1, batch, sz)
+        end
+
+        local loss = criterion:forward(outputs, Y_batch)
+        total_loss = total_loss + loss * batch_size
+    end
+
+    return total_loss / N
+end
+
 -- NCE training
 function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q, valid_blanks_Y, valid_blanks_index, unigram_p)
   local eta = opt.eta
   local batch_size = opt.batch_size
   local max_epochs = opt.max_epochs
+  local K = opt.K_noise
   local N = X:size(1)
 
-  local model = NCE_LM(unigram_p) -- pass log unigram p
+  -- init model
+  local model = NCE_hid()
+  -- save input embeds
+  local in_embeds = model:get(1)
+
+  --asdf
+  local asdf = nn.Linear(opt.hidden, vocab_size)
+
+  -- other nodes
+  local out_lookup = nn.LookupTable(vocab_size, opt.hidden)
+  out_lookup.weight = asdf.weight:clone()
+  local out_bias = nn.LookupTable(vocab_size, 1)
+  out_bias.weight = asdf.bias:clone()
+  local dot = nn.Sequential():add(nn.CMulTable()):add(nn.Sum(2))
+  local add = nn.CAddTable()
+  local p_ml = nn.LookupTable(vocab_size, 1)
+  p_ml.weight = unigram_p:clone()
+  p_ml.weight:add(torch.log(K))
+  local sig = nn.Sequential():add(nn.CSubTable()):add(nn.Sigmoid())
   local criterion = nn.BCECriterion()
-
-  -- only call this once
-  local params, grads = model:getParameters()
-
-  -- sgd state
-  local state = { learningRate = eta }
 
   local prev_loss = 1e10
   local epoch = 1
@@ -535,79 +491,99 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
       Y = Y:index(1, shuffle)
 
       -- loop through each batch
-      model:training()
       for batch = 1, N, batch_size do
           if opt.debug == 1 then
             if ((batch - 1) / batch_size) % 300 == 0 then
               print('Sample:', batch)
               print('Current train loss:', total_loss / batch)
               print('Current time:', 1000 * (timer:time().real - epoch_time), 'ms')
+
+              local blanks_loss = model_eval_NCE(model, out_lookup.weight, out_bias.weight, valid_blanks_X, valid_blanks_Y, valid_blanks_Q, valid_blanks_index)
+              print('Valid blanks perplexity:', torch.exp(blanks_loss))
             end
           end
           local sz = batch_size
           if batch + batch_size > N then
             sz = N - batch + 1
+            --samples = samples:narrow(1, 1, K*sz)
           end
-          local X_batch = X:narrow(1, batch, sz):double()
-          local Y_batch = Y:narrow(1, batch, sz):double()
+          local X_batch = X:narrow(1, batch, sz)
+          local Y_batch = Y:narrow(1, batch, sz)
 
-          -- closure to return err, df/dx
-          local func = function(x)
-              -- get new parameters
-              if x ~= params then
-                params:copy(x)
-              end
-              -- reset gradients
-              grads:zero()
+          -- sample for NCE
+          local samples = torch.multinomial(torch.exp(unigram_p), K*sz, true):long()
 
-              -- I need to: sample K_noise unigram guys. Append the words to Y_batch. Add K_noise 0's (per guy in the batch) as the gold for criterion
-              -- D_noise will indicate if noise or not.
-              local K = opt.K_noise
-              local D_noise = torch.cat(torch.ones(sz), torch.zeros(K * sz))
-              local X_batch = torch.repeatTensor(X_batch, K+1, 1)
-              local samples = torch.multinomial(torch.exp(unigram_p), K*sz, true):double()
-              local Y_batch = torch.cat(Y_batch, samples)
+          -- I need to: sample K_noise unigram guys. Append the words to Y_batch. Add K_noise 0's (per guy in the batch) as the gold for criterion
+          -- D_noise will indicate if noise or not.
+          local D_noise = torch.cat(torch.ones(sz), torch.zeros(K*sz))
+          --local x_in = X_batch:repeatTensor(K+1, 1)
+          local x_in = X_batch
+          local y_in = torch.cat(Y_batch, samples)
 
-              -- forward
-              local inputs = {{X_batch, Y_batch}, Y_batch, Y_batch}
-              local NCE_val = model:forward(inputs)
-              local loss = criterion:forward(NCE_val, D_noise)
+          -- zero grads
+          model:zeroGradParameters()
+          out_lookup:zeroGradParameters()
+          out_bias:zeroGradParameters()
 
-              -- track errors
-              total_loss = total_loss + loss * batch_size
+          -- forward
+          local hid = model:forward(x_in)
+          hid = hid:repeatTensor(K+1, 1)
+          local e_out = out_lookup:forward(y_in)
+          local b_out = out_bias:forward(y_in)
+          local dot_prod = dot:forward({hid, e_out})
+          local z = add:forward({dot_prod, b_out})
 
-              -- compute gradients
-              local df_do = criterion:backward(NCE_val, D_noise)
-              model:backward(inputs, df_do)
+          --DEBUG 1
+          --print('from here:')
+          --print(z:narrow(1, 1, 32))
+          --local linmmm = nn.Linear(opt.hidden, vocab_size)
+          --linmmm.weight = out_lookup.weight
+          --linmmm.bias = out_bias.weight
+          --local testmmm = nn.Sequential():add(model):add(linmmm)
+          --print('real:')
+          --local resmmm = testmmm:forward(x_in):narrow(1, 1, 32)
+          --for j = 1, Y_batch:size(1) do
+            --print(resmmm[j][Y_batch[j]])
+          --end
+          --io.read()
 
-              -- zero out unigram ML grads
-              model:get(1):get(3):get(1).gradWeight:zero()
+          local p = p_ml:forward(y_in)
+          local output = sig:forward({z, p})
+          local loss = criterion:forward(output, D_noise)
 
-              return loss, grads
-          end
+          -- track errors
+          total_loss = total_loss + loss * sz
 
-          optim.sgd(func, params, state)
+          -- backward
+          local dL_do = criterion:backward(output, D_noise)
+          local dL_dz = sig:backward({z, p}, dL_do)[1]
+          local dL_dadd = add:backward({dot_prod, b_out}, dL_dz)
+          out_bias:backward(y_in, dL_dadd[2])
+          out_bias:updateParameters(eta)
+          local dL_ddot = dot:backward({hid, e_out}, dL_dadd[1])
+          out_lookup:backward(y_in, dL_ddot[2])
+          out_lookup:updateParameters(eta)
+
+          --model:backward(x_in, dL_ddot[1])
+          local g = dL_ddot[1]:clone()
+          g = g:reshape(K+1, sz, opt.hidden)
+          g = g:sum(1):squeeze()
+          model:backward(x_in, g)
+          model:updateParameters(eta)
 
           -- normalize weights
           if opt.L2s > 0 then
-            local renorm = function(row)
-              local n = row:norm()
-              row:mul(opt.L2s):div(1e-7 + n)
-            end
-            local w = model:get(1):get(1):get(1):get(1):get(1).weight
-            for j = 1, w:size(1) do
-              renorm(w[j])
-            end
+            in_embeds.weight:renorm(2, 2, opt.L2s)
           end
       end
 
       print('Train loss:', total_loss / N)
 
       if opt.has_blanks == 1 then
-        local blanks_loss = model_eval_NCE(model, valid_blanks_X, valid_blanks_Y, valid_blanks_Q, valid_blanks_index)
+        local blanks_loss = model_eval_NCE(model, out_lookup.weight, out_bias.weight, valid_blanks_X, valid_blanks_Y, valid_blanks_Q, valid_blanks_index)
         print('Valid blanks perplexity:', torch.exp(blanks_loss))
       end
-      local loss = model_eval_NCE(model, valid_X, valid_Y)
+      local loss = model_eval_NCE(model, out_lookup.weight, out_bias.weight, valid_X, valid_Y)
       print('Valid perplexity:', torch.exp(loss))
 
       print('time for one epoch: ', (timer:time().real - epoch_time) * 1000, 'ms')
@@ -618,7 +594,7 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
       end
       prev_loss = loss
       epoch = epoch + 1
-      torch.save(opt.model_out_name .. '_' .. opt.lm .. '.t7', { model = model })
+      torch.save(opt.model_out_name .. '_' .. opt.lm .. '.t7', { model = model, out_bias = out_bias, out_lookup = out_lookup })
   end
   print('Trained', epoch, 'epochs')
   return model, prev_loss
@@ -652,6 +628,8 @@ function main()
 
    print('Train context size:', X_context:size(1))
 
+   torch.manualSeed(3435)
+
    -- Train.
    if opt.action == 'train' then
      print('Training...')
@@ -671,6 +649,7 @@ function main()
        for i = 1, Y:size(1) do
          unigram_p[Y[i]] = unigram_p[Y[i]] + 1
        end
+       unigram_p:div(unigram_p:sum())
        unigram_p:log()
 
        train_model_NCE(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index, unigram_p)
