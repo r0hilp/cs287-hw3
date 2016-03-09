@@ -2,171 +2,94 @@
 \documentclass[11pt]{article}
 
 \usepackage{common}
-\title{HW0: Sample Assignment}
-\author{Alexander Rush \\ srush@seas.harvard.edu \and Sam Wiseman \\ swiseman@seas.harvard.edu }
+\title{HW3: Language Modeling}
+\author{Jeffrey Ling \\ jling@college.harvard.edu \and Rohil Prasad \\ prasad01@college.harvard.edu }
 \begin{document}
 
 \maketitle{}
 \section{Introduction}
 
-This note lays out our expectation for a homework submission in
-\textit{CS287: Statistical Natural Language Processing}. While you do
-not have to follow this template to the letter, we do expect that
-write-ups have a very clear structure and cover all the elements
-described in this note. With this in mind, the burden is on the
-presenter to demonstrate why deviations from the standard are
-necessary.
+In this assignment, we examine the problem of language modeling. Given a set of words, we want to determine which word comes after it. Note, however, that there may not be a ``best'' word to follow a prefix. For example, ``fish'' and ``chicken'' could both be almost equally likely to follow the prefix ``I ate \_\_\_''. Therefore, it makes more sense to try and find a good \textbf{probability distribution} of the next word given the prefix. We will define what it means to be ``good'' later in the paper. 
 
-All write-ups should include a short introduction. In this section you
-should summarize the underlying problem in high-level language and
-describe the extensions that you have decided to propose in your
-implementation. When you describe these extensions you should
-carefully cite the papers of interest. For instance, it will often be
-useful to cite the work seen in class
-\citep{murphy2012machine}. Alternatively, you can also cite papers
-inline, for instance the work of \citet{berger1996maximum}.
+We implement and discuss several different methods of language modeling on the Penn Treebank in this paper. Our first class of algorithms are probabilistic count-based algorithms, consisting of maximum likelihood estimation, Laplace smoothing, Witten-Bell smoothing, and Kneser-Ney smoothing. Our second class of algorithms are deep-learning algorithms, consisting of the neural network described in [Bengio]. Furthermore, we also experiment with augmenting this neural network with word embeddings learned via Noise Contrastive Estimation (NCE). 
 
+In Section 2, we give a formal description of our problem and establish our notation. In Section 3, we give detailed descriptions of the algorithms listed above. In Section 4, we present our experimental results. In Section 5, we discuss our findings. 
 
 \section{Problem Description}
 
-In general, homeworks will be specified using informal
-language. As part of the assignment, we expect you to write-out a
-definition of the problem and your model in formal language. For this
-class, we will use the following notation:
+Assume our training corpus consists of a sequence of words $w_1, w_2, \dots, w_N$ where $w_i$ is drawn from a vocabulary $\mathcal{V}$ for every $i$. 
 
+Our training data represents this corpus as a set of tuples $(\mathbf{x}_i, y_i)$, where $\mathbf{x}_i$ is the prefix $w_1w_2\dots w_{i-1}$ and $y_i$ is equal to the suffix $w_i$. 
+
+Our goal is to train a model that will take in an input sequence $\mathbf{x}$ of words and output a vector $\mathbf{y} \in \mathbb{R}^{1 \times |\mathcal{V}|}$ where $\mathbf{y}_i = p(v_i | x)$ for $v_i$ the $i$th element of $|\mathcal{V}|$.
+
+\subsection{Count-Based Model Notation}
+
+We use some specific notation for our count-based models. 
 \begin{itemize}
-\item $\boldb, \boldm$;  bold letters for vectors.
-\item $\boldB, \boldM$;  bold capital letters for matrices.
-\item $\mcB, \mcM$;  script-case for sets.
-\item $b_i, x_i$; lower case for scalars or indexing into vectors.
+  \item $w^{i-1}_{i-n+1}$ is our shorthand for the size $n-1$ prefix $w_{i-n+1}w_{i-n+2}\dots w_{i-1}$ of $w_i$. When $n = 2$, we will continue to use $w_{i-1}$. 
+  \item $c(w_i)$ denotes the total number of occurrences of the word $w_i$ in the training corpus. 
+  \item $c(w^{i-1}_{i-n+1}, w_i)$ denotes the total number of occurrences of the word $w_i$ after the prefix $w^{i-1}_{i-n+1}$ in the training corpus. 
+  \item $N(\cdot, w_i)$ denotes the total number of unique prefixes of size $n$ that $w_i$ has in the training corpus. 
+  \item $N(w^{i-1}_{i-n+1}, \cdot)$ denotes the total number of unique suffixes that the sequence $w^{i-1}_{i-n+1}$ has in the training corpus. 
 \end{itemize}
 
+\subsection{Evaluation}
 
-For instance in natural language processing, it is common to use
-discrete sets like $\mcV$ for the vocabulary of the language, or $\mcT$ for a
-tag set of the language.  We might also want one-hot vectors
-representing words. These will be of the type
-$\boldv \in \{0,1\}^{|\mcV|}$. In a note, it is crucial to define the
-types of all variables that are introduced. The problem description is the
-right place to do this.
+Unlike earlier assignments, we are outputting a \emph{distribution} of possibilities given an input $\mathbf{x}$ rather than a \emph{prediction} of the word following $\mathbf{x}$. 
 
-% NLP is also
-% full of sequences. For instance sentences, $w_1, \ldots, w_N$, where
-% here $N$ is a constant length and $w_i \in \mcV$ for all
-% $i \in \{1, \ldots N\}$. If we pretend sentences are all the same
-% length, we can have scoring function over sentences,
-% $s : \mcV^N \mapsto \reals$.  One might be defined as:
-
-% \[ s(w_1, \ldots, w_N) = \sum_{i = 1}^N p(w_i | w_{i-2}, w_{i-1}), \]
-
-% \noindent where $p$ is the bigram probability, which we will cover later in the class.
+Therefore, we will evaluate by a metric called \emph{perplexity}. 
 
 \section{Model and Algorithms}
 
-Here you specify the model itself. This section should formally
-describe the model used to solve the task proposed in the previous
-section. This section should try to avoid introducing new vocabulary
-or notation, when possible use the notation from the previous section.
-Feel free to use the notation from class, but try to make the note
-understandable as a standalone piece of text.
+\subsection{Count-Based Models}
 
-This section is also a great place to include other material that
-describes the underlying structure and choices of your model, for
-instance here are some example tables and algorithms from full
-research papers:
+All of our count-based models are $n$-gram models, meaning we fix an $n$ and assume $p(w_i|w^{i-1}_1) = p(w_i|w^{i-1}_{i-n+1})$. 
 
+\subsubsection{Maximum Likelihood Estimation}
 
+The maximum likelihood estimation $p_{MLE}(w_i|w^{i-1}_{i-n+1})$ is given by 
+$$p_{MLE}(w_i|w^{i-1}_{i-n+1}) = \frac{c(w^{i-1}_{i-n+1}, w_i)}{\sum_{w' \in \mathcal{V}} c(w^{i-1}_{i-n+1}, w')}$$
 
-\begin{itemize}
-\item diagrams of your model,
+This is by definition the probability over the training corpus of the word $w_i$ appearing conditioned on the prefix being equal to $w^{i-1}_{i-n+1}$. 
 
-  \begin{center}
-    \includegraphics[width=0.4\textwidth]{network}
-  \end{center}
-\item feature tables,
+\subsubsection{Laplace Smoothing}
 
-  \begin{center}
-    \begin{tabular}{@{}lll@{}}
-      \toprule
-      &\multicolumn{2}{c}{Mention Features  } \\
-      & Feature & Value Set\\
-      \midrule
-      & Mention Head & $\mcV$ \\
-      & Mention First Word & $\mcV$ \\
-      & Mention Last Word & $\mcV$ \\
-      & Word Preceding Mention & $\mcV$ \\
-      & Word Following Mention & $\mcV$\\
-      & \# Words in Mention & $\{1, 2, \ldots \}$ \\
-      & Mention Type & $\mathcal{T}$ \\
-      \bottomrule
-    \end{tabular}
-  \end{center}
+ One thing to note is that our MLE model will by definition assign a (clearly erroneous) probability of $0$ to $p(w|w^{i-1}_{i-n+1})$ for any $w^{i-1}_{i-n+1}$ that does not appear in the training corpus. This poses a problem for larger $n$, since the number of distinct $n$-grams in the training corpus will only form a small fraction of the number $|\mathcal{V}|^n$ of possible $n$-grams.
 
-\item pseudo-code,
+The traditional maximum likelihood $n$-gram model by definition will often erroneously assign a probability of $0$ to $p(w|w^{i-1}_{i-n+1})$. 
 
-  \begin{algorithmic}[1]
-    \Procedure{Linearize}{$x_1\ldots x_N$, $K$, $g$}
-    \State{$B_0 \gets \langle (\langle \rangle, \{1, \ldots, N\}, 0, \boldh_0, \mathbf{0})  \rangle$}
-    \For{$m = 0, \ldots, M-1$ }
-    \For{$k = 1, \ldots, |B_m|$}
-    \For{$i \in \mcR$}
-    \State{$(y, \mcR, s, \boldh) \gets \mathrm{copy}(B_m^{(k)})$}
-    \For{word $w$ in phrase $x_i$}
-    \State{$y \gets y $ append $w$ }
-    \State{$s \gets s + \log q(w, \boldh) $ }
-    \State{$\boldh \gets \delta(w, \boldh)$}
-    \EndFor{}
-    \State{$B_{m+|w_i|} \gets B_{m+|w_i|} + (y, \mcR - i, s,   \boldh)$}
-    \State{keep top-$K$ of $B_{m+|w_i|}$ by $f(x, y) + g(\mcR)$}
-    \EndFor{}
-    \EndFor{}
-    \EndFor{}
-    \State{\Return{$B_{M}^{(k)}$}}
-    \EndProcedure{}
-  \end{algorithmic}
+We fix this by adding $\alpha$ to the count of every word. Then, our probability becomes 
+$$p_L(w_i|w^{i-1}_{i-n+1}, \alpha) = \frac{\alpha + c(w^{i-1}_{i-n+1}, w_i)}{\alpha \cdot |\mathcal{V}| + \sum_{w' \in \mathcal{V}} c(w^{i-1}_{i-n+1}, w')}$$
 
-\end{itemize}
+\subsubsection{Witten-Bell Smoothing}
 
+Witten-Bell smoothing is a form of interpolative smoothing. Interpolative smoothing attempts to handle the problem of MLE a little differently. To prevent a prediction of $0$ for a prefix unseen in the training corpus, 
+
+$$1 - \lambda_{w_{i-1}} = \frac{N(w_{i-1}, \cdot)}{N(w_{i-1}, \cdot) + c(w_{i-1}, w_i)}$$
+
+$$p_{WB}(w_i|w_{i-1}) = \lambda_{w_{i-1}} p_L(w_i|w_{i-1}) + (1-\lambda_{w_{i-1}}) p_L(w_i)$$
+
+$$1 - \lambda_{w^{i-1}_{i-n+1}} = \frac{N(w^{i-1}_{i-n+1}, \cdot)}{N(w^{i-1}_{i-n+1}, \cdot) + c(w_i, w^{i-1}_{i-n+1})}$$ 
+
+$$p_{WB}(w_i|w^{i-1}_{i-n+1}) = \lambda_{w^{i-1}_{i-n+1}} p_L(w_i|w^{i-1}_{i-n+1}) + (1-\lambda_{w^{i-1}_{i-n+1}}) p_{WB}(w_i|w^{i-1}_{i-n+2})$$
+
+\subsubsection{Kneser-Ney Smoothing}
+
+Kneser-Ney smoothing is an example of the ``absolute discounting'' paradigm of smoothing. 
+
+$$p_{KN}(w_i) = N(\cdot, w_i)/\sum_{w' \in \mathcal{V}} N(\cdot, w')$$
+
+$$p_{KN}(w_i|w^{i-1}_{i-n+1}) = \frac{\text{max}\{c(w_i,w^{i-1}_{i-n+1})-\delta, 0\}}{\sum_{w' \in \mathcal{V}} c(w', w^{i-1}_{i-n+1})} + \frac{\delta N(w^{i-1}_{i-n+1}, \cdot)}{\sum_{w' \in \mathcal{V}} c(w', w^{i-1}_{i-n+1})$$
+
+\subsection{Neural Network Model}
+
+\subsection{Noise Contrastive Estimation}
 
 \section{Experiments}
 
-Finally we end with the experimental section. Each assignment will make clear the main experiments and baselines that you should run. For these experiments you should present a main results table. Here we give a sample Table~\ref{tab:results}. In addition to these results you should describe in words what the table shows and the relative performance of the models.
-
-Besides the main results we will also ask you to present other results
-comparing particular aspects of the models. For instance, for word
-embedding experiments, we may ask you to show a chart of the projected
-word vectors. This experiment will lead to something like
-Figure~\ref{fig:clusters}. This should also be described within the
-body of the text itself.
-
-
-\begin{table}[h]
-\centering
-\begin{tabular}{llr}
- \toprule
- Model &  & Acc. \\
- \midrule
- \textsc{Baseline 1} & & 0.45\\
- \textsc{Baseline 2} & & 2.59 \\
- \textsc{Model 1} & & 10.59  \\
- \textsc{Model 2} & &13.42 \\
- \textsc{Model 3} & & 7.49\\
- \bottomrule
-\end{tabular}
-\caption{\label{tab:results} Table with the main results.}
-\end{table}
-
-
-\begin{figure}
-  \centering
-  \includegraphics[width=6cm]{cluster_viz}
-  \caption{\label{fig:clusters} Sample qualitative chart.}
-\end{figure}
-
-
 \section{Conclusion}
 
-End the write-up with a very short recap of the main experiments and the main results. Describe any challenges you may have faced, and what could have been improved in the model.
 
 \bibliographystyle{apalike}
 \bibliography{writeup}
