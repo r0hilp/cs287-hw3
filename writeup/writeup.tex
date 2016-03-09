@@ -62,25 +62,43 @@ The traditional maximum likelihood $n$-gram model by definition will often erron
 We fix this by adding $\alpha$ to the count of every word. Then, our probability becomes 
 $$p_L(w_i|w^{i-1}_{i-n+1}, \alpha) = \frac{\alpha + c(w^{i-1}_{i-n+1}, w_i)}{\alpha \cdot |\mathcal{V}| + \sum_{w' \in \mathcal{V}} c(w^{i-1}_{i-n+1}, w')}$$
 
+The optimal value for $\alpha$ is determined by grid search on a validation set. 
+
 \subsubsection{Witten-Bell Smoothing}
 
-Witten-Bell smoothing is a form of interpolative smoothing. Interpolative smoothing attempts to handle the problem of MLE a little differently. To prevent a prediction of $0$ for a prefix unseen in the training corpus, 
+The Witten-Bell probability for bigrams with an additive smoothing parameter $\alpha$ is written as
+
+$$p_{WB}(w_i|w_{i-1}) = \lambda_{w_{i-1}} p_L(w_i|w_{i-1}, \alpha) + (1-\lambda_{w_{i-1}}) p_L(w_i| \alpha)$$
+
+where $\lambda_{w_{i-1}}$ is determined by the following equation:
 
 $$1 - \lambda_{w_{i-1}} = \frac{N(w_{i-1}, \cdot)}{N(w_{i-1}, \cdot) + c(w_{i-1}, w_i)}$$
 
-$$p_{WB}(w_i|w_{i-1}) = \lambda_{w_{i-1}} p_L(w_i|w_{i-1}) + (1-\lambda_{w_{i-1}}) p_L(w_i)$$
+We can then define Witten-Bell recursively for $n$-grams as
+
+$$p_{WB}(w_i|w^{i-1}_{i-n+1}) = \lambda_{w^{i-1}_{i-n+1}} p_L(w_i|w^{i-1}_{i-n+1}, \alpha) + (1-\lambda_{w^{i-1}_{i-n+1}}) p_{WB}(w_i|w^{i-1}_{i-n+2})$$
+
+where $\lambda_{w^{i-1}_{i-n+1}}$ is given by:
 
 $$1 - \lambda_{w^{i-1}_{i-n+1}} = \frac{N(w^{i-1}_{i-n+1}, \cdot)}{N(w^{i-1}_{i-n+1}, \cdot) + c(w_i, w^{i-1}_{i-n+1})}$$ 
 
-$$p_{WB}(w_i|w^{i-1}_{i-n+1}) = \lambda_{w^{i-1}_{i-n+1}} p_L(w_i|w^{i-1}_{i-n+1}) + (1-\lambda_{w^{i-1}_{i-n+1}}) p_{WB}(w_i|w^{i-1}_{i-n+2})$$
+The optimal value for $\alpha$ is determined by grid search on a validation set. 
 
 \subsubsection{Kneser-Ney Smoothing}
 
-Kneser-Ney smoothing is an example of the ``absolute discounting'' paradigm of smoothing. 
+For Kneser-Ney, we define the lower-order probabilities as follows. Fix a ``discount parameter'' $\delta$. For unigrams, the equation is:
 
 $$p_{KN}(w_i) = N(\cdot, w_i)/\sum_{w' \in \mathcal{V}} N(\cdot, w')$$
 
-$$p_{KN}(w_i|w^{i-1}_{i-n+1}) = \frac{\text{max}\{c(w_i,w^{i-1}_{i-n+1})-\delta, 0\}}{\sum_{w' \in \mathcal{V}} c(w', w^{i-1}_{i-n+1})} + \frac{\delta N(w^{i-1}_{i-n+1}, \cdot)}{\sum_{w' \in \mathcal{V}} c(w', w^{i-1}_{i-n+1})$$
+Then for bigrams, it is defined as 
+
+$$p_{KN}(w_i | w_{i-1}) = \frac{\text{max}(c(w_{i-1}, w_i) - \delta, 0)}{\sum_{w' \in \mathcal{V}} c(w_{i-1}, w')}$$
+
+Finally, we can define it recursively for general $n$-grams:
+
+$$p_{KN}(w_i | w^{i-1}_{i-n+1}) = \frac{\text{max}(c(w^{i-1}_{i-n+1}, w_i) - \delta, 0)}{\sum_{w' \in \mathcal{V}}c(w^{i-1}_{i-n+1}, w')}$$
+
+The optimal value for $\delta$ is determined by grid search on a validation set. 
 
 \subsection{Neural Network Model}
 
