@@ -97,27 +97,34 @@ function make_count_matrix(X, Y)
   return CM
 end
 
-function predict_laplace(X, CM, queries, alpha, renormalize)
+function predict_laplace(X, CM, queries, vocab_size, alpha, renormalize)
   -- Predict distribution of the word following X[i] over queries[i]
   local preds = torch.zeros(X:size(1), queries:size(2)) 
   for i = 1, X:size(1) do
     local prefix = hash(X[i])
     -- Return uniform distribution if nil
     if CM[prefix] == nil then
-      preds[i]:fill(1/queries:size(2))
+      if renormalize == true then
+        preds[i]:fill(1/queries:size(2))
+      end
     else
+      total_count = alpha * vocab_size
       for j = 1, queries[i]:size(1) do
         preds[i][j] = alpha
         if CM[prefix][queries[i][j]] ~= nil then
           preds[i][j] = preds[i][j] + CM[prefix][queries[i][j]]
         end
       end
+      for suffix, count in pairs(CM[prefix]) do
+        total_count = total_count + count
+      end
+      preds[i]:div(total_count)
       if renormalize == true then
-        sum = preds[i]:sum()
-        if sum == 0 then
+        queries_sum = preds[i]:sum()
+        if queries_sum == 0 then
           preds[i]:fill(1/queries:size(2))
         else
-          preds[i]:div(sum)
+          preds[i]:div(queries_sum)
         end
       end
     end
@@ -126,92 +133,126 @@ function predict_laplace(X, CM, queries, alpha, renormalize)
   return preds
 end
 
-function predict_witten_bell(X, bigram_CM, trigram_CM, queries)
+function predict_witten_bell(X, bigram_CM, trigram_CM, queries, vocab_size, alpha, renormalize)
   -- Predict distribution of the word following X[i] over queries[i]
   local preds = torch.zeros(X:size(1), queries:size(2))
-  local bigram_preds = predict_laplace(X, bigram_CM, queries, 0, false)
-  local ngram_size = X:size(2) + 1 
-  if ngram_size == 2 then 
-    -- Calculate unigram counts
-    unigram_CM = {}
-    for bigram, suffixes in pairs(bigram_CM) do 
-      for unigram, count in pairs(suffixes) do
-        if unigram_CM[unigram] == nil then
-          unigram_CM[unigram] = count
-        else
-          unigram_CM[unigram] = unigram_CM[unigram] + count
-        end
+  preds:fill(alpha)
+
+  -- Get unigram, bigram, and trigram predictions
+  local unigram_CM = {}
+  for bigram, suffixes in pairs(bigram_CM) do 
+    for unigram, count in pairs(suffixes) do
+      if unigram_CM[unigram] == nil then
+        unigram_CM[unigram] = count
+      else
+        unigram_CM[unigram] = unigram_CM[unigram] + count
       end
     end
-    total_unigram_count = tblsum(unigram_CM)
+  end
+  local total_unigram_count = alpha * vocab_size + tblsum(unigram_CM)
+  local unigram_preds = torch.zeros(X:size(1), queries:size(2))
+  for i = 1, X:size(1) do
+    for j = 1, queries:size(2) do
+      if unigram_CM[queries[i][j]] ~= nil then
+        unigram_preds[i][j] = unigram_CM[queries[i][j]]/total_unigram_count
+      end
+    end
+  end
+
+  local bigram_preds = predict_laplace(X:select(2, X:size(2)):resize(X:size(1), 1), bigram_CM, queries, vocab_size, alpha, false)
+  local trigram_preds = predict_laplace(X, trigram_CM, queries, vocab_size, alpha, false)
+
+  local ngram_size = X:size(2) + 1 
+  -- calculate wb probabilities for bigram models
+  for i = 1, X:size(1) do
+    local prefix = hash(X[i]) % vocab_size^2
+    if bigram_CM[prefix] == nil then
+      if renormalize == true then
+        preds[i]:fill(1/queries:size(2))
+      end
+    else
+      local unique_types = tbllength(bigram_CM[prefix])
+      local total_bigram_count = tblsum(bigram_CM[prefix])
+      local lambda = 1 - unique_types/(unique_types + total_bigram_count)
+      bigram_preds[i]:mul(lambda)
+      unigram_preds[i]:mul(1-lambda)
+      preds[i] = bigram_preds[i]:add(unigram_preds[i])
+    end
+  end
+  -- one more set of calculations for ngram_size = 3
+  if ngram_size == 3 then
+    for i = 1, X:size(1) do
+      local trigram_prefix = hash(X[i])
+      if trigram_CM[trigram_prefix] == nil then
+        if renormalize == true then
+          preds[i]:fill(1/queries:size(2))
+        end
+      else
+        local unique_types = tbllength(trigram_CM[trigram_prefix])
+        local total_trigram_count = tblsum(trigram_CM[trigram_prefix])
+        local lambda = 1 - unique_types/(unique_types + total_trigram_count)
+        trigram_preds:mul(lambda)
+        preds[i]:mul(1-lambda)
+        preds[i] = trigram_preds[i]:add(preds[i])
+      end
+    end
+  end
+
+  --renormalize preds
+  if renormalize == true then
+    for i = 1, preds:size(1) do
+      preds[i]:div(preds[i]:sum())
+    end
+  end
+
+  return preds
+end
+
+function predict_kneser_ney(X, bigram_CM, trigram_CM, queries, vocab_size, alpha, delta, renormalize)
+  -- Predict distribution of the word following X[i] over queries[i]
+  local preds = torch.zeros(X:size(1), queries:size(2))
+
+  -- Get p(w_i)
+  local unigram_preds = torch.zeros(vocab_size)
+  for word = 1, vocab_size do
+    for bigram, suffixes in pairs(bigram_CM) do
+      if suffixes[word] ~= nil then
+        unigram_preds[word] = unigram_preds[word] + 1
+      end
+    end
+  end
+
+  -- Get bigram pred
+  for i = 1, X:size(1) do
+    prefix = hash(X[i]) % vocab_size^2
+    for j = 1, queries:size(2) do
+      if bigram_CM[prefix] == nil then
+        if renormalize == true then
+          preds[i]:fill(1/queries:size(2))
+        end
+      else
+        if bigram_CM[prefix][queries[i][j]] ~= nil then
+          preds[i][j] = math.max(bigram_CM[prefix][queries[i][j]] - delta, 0) / tblsum(bigram_CM[prefix])
+        end
+        preds[i][j] = preds[i][j] + unigram_preds[queries[i][j]]
+      end
+    end
+  end
+
+  -- Get trigram pred
+  if X:size(2) == 2 then
     for i = 1, X:size(1) do
       prefix = hash(X[i])
-      if bigram_CM[prefix] == nil then
-        preds[i]:fill(1/queries:size(2))
-      else
-        unique_types = tbllength(bigram_CM[prefix])
-        total_bigram_count = tblsum(bigram_CM[prefix])
-        lambda = 1 - unique_types/(unique_types + total_bigram_count)
-        for j = 1, queries:size(2) do
-          if bigram_CM[prefix][queries[i][j]] ~= nil then
-            bigram_count = bigram_CM[prefix][queries[i][j]]
-          else
-            bigram_count = 0
+      for j = 1, queries:size(2) do
+        if trigram_CM[prefix] == nil then
+          if renormalize == true then
+            
           end
-          if unigram_CM[queries[i][j]] ~= nil then
-            unigram_count = unigram_CM[queries[i][j]] or 0
-          else
-            unigram_count = 0
-          end
-          preds[i][j] = (bigram_count/total_bigram_count) * lambda + (unigram_count/total_unigram_count) * (1 - lambda)
-        end
-        sum = preds[i]:sum()
-        if sum == 0 then
-          preds[i]:fill(1/queries:size(2))
-        else
-          preds[i]:div(sum)
-        end
-      end
-    end
-  elseif ngram_size == 3 then
-    for i = 1, X:size(1) do
-      trigram_prefix = hash(X[i])
-      bigram_prefix = trigram_prefix % vocab_size^2
-      if trigram_CM[trigram_prefix] == nil then
-        preds[i]:fill(1/queries:size(2))
-      else
-        unique_types = tbllength(trigram_CM[trigram_prefix])
-        total_trigram_count = tblsum(trigram_CM[trigram_prefix])
-        if bigram_CM[bigram_prefix] ~= nil then
-          total_bigram_count = tblsum(bigram_CM[bigram_prefix])
-        else
-          total_bigram_count = 1
-        end
-        lambda = 1 - unique_types/(unique_types + total_trigram_count)
-        for j = 1, queries:size(2) do
-          if trigram_CM[trigram_prefix][queries[i][j]] ~= nil then
-            trigram_count = trigram_CM[trigram_prefix][queries[i][j]]
-          else
-            trigram_count = 0
-          end
-          if bigram_CM[bigram_prefix][queries[i][j]] ~= nil then
-            bigram_count = bigram_CM[bigram_prefix][queries[i][j]]
-          else
-            bigram_count = 0
-          end
-          preds[i][j] = (trigram_count/total_trigram_count) * lambda + (bigram_count/total_bigram_count) * (1 - lambda)
-        end
-        sum = preds[i]:sum()
-        if sum == 0 then
-          preds[i]:fill(1/queries:size(2))
-        else
-          preds[i]:div(sum)
         end
       end
     end
   end
 
-  return preds
 end
 
 function perplexity(preds, Y)
@@ -661,21 +702,28 @@ function main()
      print('Training...')
      if opt.lm == 'mle' then
        CM = make_count_matrix(X, Y)
-       preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, 0) 
+       preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, vocab_size, 0, false) 
        print(perplexity(preds, valid_blanks_index))
      elseif opt.lm == 'laplace' then
        alpha = opt.alpha
        CM = make_count_matrix(X, Y)
        -- run predictions on valid.txt
-       valid_preds = predict_laplace(valid_X, CM, valid_Y:resize(valid_Y:size(1), 1), alpha, false)
+       valid_preds = predict_laplace(valid_X, CM, valid_Y:resize(valid_Y:size(1), 1), vocab_size, alpha, false)
        print(torch.exp(valid_preds:log():mul(-1):mean()))
        -- ...and valid_blanks.txt
-       valid_blanks_preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, alpha, true) 
+       valid_blanks_preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, vocab_size, alpha, true) 
        print(perplexity(valid_blanks_preds, valid_blanks_index))
      elseif opt.lm == 'wb' then
+       alpha = opt.alpha
        bigram_CM = torch.load(opt.bigram_cm)
        trigram_CM = torch.load(opt.trigram_cm)
-       valid_blanks_preds = predict_witten_bell(valid_blanks_X, bigram_CM, trigram_CM, valid_blanks_Q)
+       -- run predictions on valid.txt
+       valid_preds = predict_witten_bell(valid_X, bigram_CM, trigram_CM, valid_Y:resize(valid_Y:size(1), 1), vocab_size, alpha, false)
+       print(valid_preds:narrow(1,1,10))
+       print(valid_Y:resize(valid_Y:size(1), 1):narrow(1,1,10))
+       print(torch.exp(valid_preds:log():mul(-1):mean()))
+       -- ...and valid_blanks.txt
+       valid_blanks_preds = predict_witten_bell(valid_blanks_X, bigram_CM, trigram_CM, valid_blanks_Q, vocab_size, alpha, true)
        print(perplexity(valid_blanks_preds, valid_blanks_index))
      elseif opt.lm == 'NNLM' then
        train_model(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
