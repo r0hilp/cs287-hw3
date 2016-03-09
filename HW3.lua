@@ -3,6 +3,10 @@ require("hdf5")
 require("nn")
 require("optim")
 
+require("cutorch")
+require("cunn")
+require("cudnn")
+
 cmd = torch.CmdLine()
 
 -- Cmd Args
@@ -252,7 +256,7 @@ function NCE_hid()
   model:add(nn.LookupTable(vocab_size, opt.embed))
   model:add(nn.View(opt.embed * window_size)) -- concat
   model:add(nn.Linear(opt.embed * window_size, opt.hidden))
-  model:add(nn.Tanh())
+  model:add(cudnn.Tanh())
 
   return model
 end
@@ -414,8 +418,13 @@ function model_eval_NCE(hid_model, W, b, X, Y, X_Q, Y_index)
     local real_model = nn.Sequential()
     real_model:add(hid_model)
     real_model:add(lin)
+    real_model:cuda()
 
     local criterion = nn.ClassNLLCriterion()
+    criterion:cuda()
+
+    local logsoftmax = cudnn.LogSoftMax()
+    logsoftmax:cuda()
 
     local total_loss = 0
     for batch = 1, X:size(1), batch_size do
@@ -423,24 +432,24 @@ function model_eval_NCE(hid_model, W, b, X, Y, X_Q, Y_index)
         if batch + batch_size > N then
           sz = N - batch + 1
         end
-        local X_batch = X:narrow(1, batch, sz)
+        local X_batch = X:narrow(1, batch, sz):cuda()
 
         local Y_batch
         local scores = real_model:forward(X_batch)
         local outputs
         if X_Q then
           local X_Q_batch = X_Q:narrow(1, batch, sz)
-          outputs = torch.Tensor(sz, X_Q:size(2))
+          outputs = torch.CudaTensor(sz, X_Q:size(2))
           for i = 1, sz do
-            outputs[i] = nn.LogSoftMax():forward(scores[i]:index(1, X_Q_batch[i]))
+            outputs[i] = logsoftmax:forward(scores[i]:index(1, X_Q_batch[i]))
           end
           Y_batch = Y_index:narrow(1, batch, sz)
         else
-          outputs = nn.LogSoftMax():forward(scores)
+          outputs = logsoftmax:forward(scores)
           Y_batch = Y:narrow(1, batch, sz)
         end
 
-        local loss = criterion:forward(outputs, Y_batch)
+        local loss = criterion:forward(outputs, Y_batch:cuda())
         total_loss = total_loss + loss * batch_size
     end
 
@@ -473,8 +482,19 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
   local p_ml = nn.LookupTable(vocab_size, 1)
   p_ml.weight = unigram_p:clone()
   p_ml.weight:add(torch.log(K))
-  local sig = nn.Sequential():add(nn.CSubTable()):add(nn.Sigmoid())
+  local sig = nn.Sequential():add(nn.CSubTable()):add(cudnn.Sigmoid())
   local criterion = nn.BCECriterion()
+
+  local bullshit = nn.Sequential():add(model):add(nn.Linear(opt.hidden, vocab_size)):add(cudnn.LogSoftMax()):cuda()
+
+  model:cuda()
+  out_lookup:cuda()
+  out_bias:cuda()
+  dot:cuda()
+  add:cuda()
+  p_ml:cuda()
+  sig:cuda()
+  criterion:cuda()
 
   local prev_loss = 1e10
   local epoch = 1
@@ -507,7 +527,7 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
             sz = N - batch + 1
             --samples = samples:narrow(1, 1, K*sz)
           end
-          local X_batch = X:narrow(1, batch, sz)
+          local X_batch = X:narrow(1, batch, sz):cuda()
           local Y_batch = Y:narrow(1, batch, sz)
 
           -- sample for NCE
@@ -515,10 +535,10 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
 
           -- I need to: sample K_noise unigram guys. Append the words to Y_batch. Add K_noise 0's (per guy in the batch) as the gold for criterion
           -- D_noise will indicate if noise or not.
-          local D_noise = torch.cat(torch.ones(sz), torch.zeros(K*sz))
-          --local x_in = X_batch:repeatTensor(K+1, 1)
-          local x_in = X_batch
-          local y_in = torch.cat(Y_batch, samples)
+          local D_noise = torch.cat(torch.ones(sz), torch.zeros(K*sz)):cuda()
+          local x_in = X_batch:repeatTensor(K+1, 1)
+          --local x_in = X_batch
+          local y_in = torch.cat(Y_batch, samples):cuda()
 
           -- zero grads
           model:zeroGradParameters()
@@ -527,7 +547,6 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
 
           -- forward
           local hid = model:forward(x_in)
-          hid = hid:repeatTensor(K+1, 1)
           local e_out = out_lookup:forward(y_in)
           local b_out = out_bias:forward(y_in)
           local dot_prod = dot:forward({hid, e_out})
@@ -539,7 +558,7 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
           --local linmmm = nn.Linear(opt.hidden, vocab_size)
           --linmmm.weight = out_lookup.weight
           --linmmm.bias = out_bias.weight
-          --local testmmm = nn.Sequential():add(model):add(linmmm)
+          --local testmmm = nn.Sequential():add(model):add(linmmm):cuda()
           --print('real:')
           --local resmmm = testmmm:forward(x_in):narrow(1, 1, 32)
           --for j = 1, Y_batch:size(1) do
@@ -564,11 +583,11 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
           out_lookup:backward(y_in, dL_ddot[2])
           out_lookup:updateParameters(eta)
 
-          --model:backward(x_in, dL_ddot[1])
-          local g = dL_ddot[1]:clone()
-          g = g:reshape(K+1, sz, opt.hidden)
-          g = g:sum(1):squeeze()
-          model:backward(x_in, g)
+          model:backward(x_in, dL_ddot[1])
+          --local g = dL_ddot[1]:clone()
+          --g = g:reshape(K+1, sz, opt.hidden)
+          --g = g:sum(1):squeeze()
+          --model:backward(x_in, g)
           model:updateParameters(eta)
 
           -- normalize weights
@@ -645,7 +664,7 @@ function main()
      elseif opt.lm == 'NNLM' then
        train_model(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
      elseif opt.lm == 'NCE' then
-       local unigram_p = torch.Tensor(vocab_size):fill(opt.alpha)
+       local unigram_p = torch.zeros(vocab_size)
        for i = 1, Y:size(1) do
          unigram_p[Y[i]] = unigram_p[Y[i]] + 1
        end
