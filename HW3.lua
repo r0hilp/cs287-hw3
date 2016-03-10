@@ -247,6 +247,10 @@ function NNLM()
 end
 
 function NCE_hid()
+  if opt.warm_start ~= '' then
+    return torch.load(opt.warm_start).model
+  end
+
   local model = nn.Sequential()
   
   model:add(nn.LookupTable(vocab_size, opt.embed))
@@ -460,14 +464,20 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
   -- save input embeds
   local in_embeds = model:get(1)
 
-  --asdf
-  local asdf = nn.Linear(opt.hidden, vocab_size)
-
   -- other nodes
-  local out_lookup = nn.LookupTable(vocab_size, opt.hidden)
-  out_lookup.weight = asdf.weight:clone()
-  local out_bias = nn.LookupTable(vocab_size, 1)
-  out_bias.weight = asdf.bias:clone()
+  local out_lookup, out_bias
+  if opt.warm_start ~= '' then
+    out_lookup = torch.load(opt.warm_start).out_lookup
+    out_bias = torch.load(opt.warm_start).out_bias
+  else
+    -- linear init
+    local lin_init = nn.Linear(opt.hidden, vocab_size)
+
+    out_lookup = nn.LookupTable(vocab_size, opt.hidden)
+    out_lookup.weight = lin_init.weight:clone()
+    out_bias = nn.LookupTable(vocab_size, 1)
+    out_bias.weight = lin_init.bias:clone()
+  end
   local dot = nn.Sequential():add(nn.CMulTable()):add(nn.Sum(2))
   local add = nn.CAddTable()
   local p_ml = nn.LookupTable(vocab_size, 1)
@@ -481,6 +491,10 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
   local timer = torch.Timer()
   while epoch <= max_epochs do
       print('Epoch:', epoch)
+      --if eta > 0.001 and epoch > 1 then
+        --eta = eta / 10
+      --end
+      print('eta:', eta)
       local epoch_time = timer:time().real
       local total_loss = 0
       local total_correct = 0
@@ -516,7 +530,6 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
           -- I need to: sample K_noise unigram guys. Append the words to Y_batch. Add K_noise 0's (per guy in the batch) as the gold for criterion
           -- D_noise will indicate if noise or not.
           local D_noise = torch.cat(torch.ones(sz), torch.zeros(K*sz))
-          --local x_in = X_batch:repeatTensor(K+1, 1)
           local x_in = X_batch
           local y_in = torch.cat(Y_batch, samples)
 
@@ -532,21 +545,6 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
           local b_out = out_bias:forward(y_in)
           local dot_prod = dot:forward({hid, e_out})
           local z = add:forward({dot_prod, b_out})
-
-          --DEBUG 1
-          --print('from here:')
-          --print(z:narrow(1, 1, 32))
-          --local linmmm = nn.Linear(opt.hidden, vocab_size)
-          --linmmm.weight = out_lookup.weight
-          --linmmm.bias = out_bias.weight
-          --local testmmm = nn.Sequential():add(model):add(linmmm)
-          --print('real:')
-          --local resmmm = testmmm:forward(x_in):narrow(1, 1, 32)
-          --for j = 1, Y_batch:size(1) do
-            --print(resmmm[j][Y_batch[j]])
-          --end
-          --io.read()
-
           local p = p_ml:forward(y_in)
           local output = sig:forward({z, p})
           local loss = criterion:forward(output, D_noise)
@@ -564,7 +562,6 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
           out_lookup:backward(y_in, dL_ddot[2])
           out_lookup:updateParameters(eta)
 
-          --model:backward(x_in, dL_ddot[1])
           local g = dL_ddot[1]:clone()
           g = g:reshape(K+1, sz, opt.hidden)
           g = g:sum(1):squeeze()
