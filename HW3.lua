@@ -420,6 +420,7 @@ function model_eval_NCE(hid_model, W, b, X, Y, X_Q, Y_index)
     real_model:add(lin)
 
     local criterion = nn.ClassNLLCriterion()
+    local logsoftmax = nn.LogSoftMax()
 
     local total_loss = 0
     for batch = 1, X:size(1), batch_size do
@@ -436,11 +437,11 @@ function model_eval_NCE(hid_model, W, b, X, Y, X_Q, Y_index)
           local X_Q_batch = X_Q:narrow(1, batch, sz)
           outputs = torch.Tensor(sz, X_Q:size(2))
           for i = 1, sz do
-            outputs[i] = nn.LogSoftMax():forward(scores[i]:index(1, X_Q_batch[i]))
+            outputs[i] = logsoftmax:forward(scores[i]:index(1, X_Q_batch[i]))
           end
           Y_batch = Y_index:narrow(1, batch, sz)
         else
-          outputs = nn.LogSoftMax():forward(scores)
+          outputs = logsoftmax:forward(scores)
           Y_batch = Y:narrow(1, batch, sz)
         end
 
@@ -519,7 +520,6 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
           local sz = batch_size
           if batch + batch_size > N then
             sz = N - batch + 1
-            --samples = samples:narrow(1, 1, K*sz)
           end
           local X_batch = X:narrow(1, batch, sz)
           local Y_batch = Y:narrow(1, batch, sz)
@@ -540,7 +540,6 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
 
           -- forward
           local hid = model:forward(x_in)
-          hid = hid:repeatTensor(K+1, 1)
           local e_out = out_lookup:forward(y_in)
           local b_out = out_bias:forward(y_in)
           local dot_prod = dot:forward({hid, e_out})
@@ -642,7 +641,7 @@ function main()
      elseif opt.lm == 'NNLM' then
        train_model(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
      elseif opt.lm == 'NCE' then
-       local unigram_p = torch.Tensor(vocab_size):fill(opt.alpha)
+       local unigram_p = torch.zeros(vocab_size)
        for i = 1, Y:size(1) do
          unigram_p[Y[i]] = unigram_p[Y[i]] + 1
        end
