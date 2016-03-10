@@ -648,8 +648,6 @@ function main()
 
    print('Train context size:', X_context:size(1))
 
-   torch.manualSeed(3435)
-
    -- Train.
    if opt.action == 'train' then
      print('Training...')
@@ -720,13 +718,24 @@ function main()
    -- Test.
    if opt.action == 'test' then
      print('Testing...')
-     test_model = torch.load(opt.test_model).model
-     local logsoftmax = nn.LogSoftMax()
-     local scores = logsoftmax:forward(test_model:forward(test_X_context))
-     scores = scores:exp()
-     scores = scores:double()
+     local test_model
+     if opt.lm == 'NCE' then
+       test_model = nn.Sequential()
+       test_model:add(torch.load(opt.test_model).model)
+
+       local out_lookup = torch.load(opt.test_model).out_lookup
+       local out_bias = torch.load(opt.test_model).out_bias
+       local lin = nn.Linear(opt.hidden, vocab_size)
+       lin.weight = out_lookup.weight
+       lin.bias = out_bias.weight
+       test_model:add(lin)
+     elseif opt.lm == 'NNLM' then
+         test_model = torch.load(opt.test_model).model
+     end
+
+     local scores = test_model:forward(test_X_context)
      local preds = torch.Tensor(test_X_context:size(1), test_X_queries:size(2))
-     f = io.open('PTB_pred.test', 'w')
+     f = io.open('PTB_pred_NCE.test', 'w')
      local out = {"ID"}
      for i = 1, test_X_queries:size(2) do
         table.insert(out, "Class"..i)
@@ -735,20 +744,22 @@ function main()
      f:write("\n")
      for i = 1, test_X_context:size(1) do
         out = {i}
-        preds[i] = scores[i]:index(1, test_X_queries[i])
-        -- renormalize
-        --sum = preds[i]:sum()
-        --if sum == 0 then
-          --preds[i]:fill(1/test_X_queries:size(2))
-        --else
-          --preds[i]:div(sum)
-        --end
+        preds[i] = nn.LogSoftMax():forward(scores[i]:index(1, test_X_queries[i]))
+        preds[i]:exp()
         for j = 1, test_X_queries:size(2) do
           table.insert(out, preds[i][j])
         end
         f:write(table.concat(out, ","))
         f:write("\n")
      end
+   end
+
+   if opt.action == 'export' then
+     local model = torch.load(opt.test_model).model
+     print(model)
+     local f_embeds = hdf5.open('word_embeds.hdf5', 'w')
+     f_embeds:write('embeds', model:get(1).weight)
+     f_embeds:close()
    end
 end
 
