@@ -535,9 +535,6 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
               print('Sample:', batch)
               print('Current train loss:', total_loss / batch)
               print('Current time:', 1000 * (timer:time().real - epoch_time), 'ms')
-
-              local blanks_loss = model_eval_NCE(model, out_lookup.weight, out_bias.weight, valid_blanks_X, valid_blanks_Y, valid_blanks_Q, valid_blanks_index)
-              print('Valid blanks perplexity:', torch.exp(blanks_loss))
             end
           end
           local sz = batch_size
@@ -659,7 +656,7 @@ function main()
        -- ...and valid_blanks.txt
        valid_blanks_preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, vocab_size, 0) 
        -- renormalize
-       for i in 1, valid_blanks_preds:size(1) do
+       for i = 1, valid_blanks_preds:size(1) do
          local sum = valid_blanks_preds[i]:sum()
          if sum ~= 0 then
            valid_blanks_preds[i]:div(sum)
@@ -675,7 +672,7 @@ function main()
        -- ...and valid_blanks.txt
        valid_blanks_preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, vocab_size, alpha) 
        -- renormalize
-       for i in 1, valid_blanks_preds:size(1) do
+       for i = 1, valid_blanks_preds:size(1) do
          local sum = valid_blanks_preds[i]:sum()
          if sum ~= 0 then
            valid_blanks_preds[i]:div(sum)
