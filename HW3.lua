@@ -681,13 +681,13 @@ function main()
      print('Training...')
      if opt.lm == 'mle' then
        CM = make_count_matrix(X, Y)
-       -- run predictions on valid.txt
+       -- run predictions on train.txt (valid gives perplexity of inf)
        valid_preds = predict_laplace(valid_X, CM, valid_Y:resize(valid_Y:size(1), 1), vocab_size, 0)
        print(torch.exp(valid_preds:log():mul(-1):mean()))
        -- ...and valid_blanks.txt
        valid_blanks_preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, vocab_size, 0) 
        -- renormalize
-       for i in 1, valid_blanks_preds:size(1) do
+       for i = 1, valid_blanks_preds:size(1) do
          local sum = valid_blanks_preds[i]:sum()
          if sum ~= 0 then
            valid_blanks_preds[i]:div(sum)
@@ -696,29 +696,29 @@ function main()
        print(perplexity(valid_blanks_preds, valid_blanks_index))
      elseif opt.lm == 'laplace' then
        alpha = opt.alpha
+       print('alpha='..alpha)
        CM = make_count_matrix(X, Y)
        -- run predictions on valid.txt
        valid_preds = predict_laplace(valid_X, CM, valid_Y:resize(valid_Y:size(1), 1), vocab_size, alpha)
-       print(torch.exp(valid_preds:log():mul(-1):mean()))
+       print('valid.txt perplexity: '..torch.exp(valid_preds:log():mul(-1):mean()))
        -- ...and valid_blanks.txt
        valid_blanks_preds = predict_laplace(valid_blanks_X, CM, valid_blanks_Q, vocab_size, alpha) 
        -- renormalize
-       for i in 1, valid_blanks_preds:size(1) do
+       for i = 1, valid_blanks_preds:size(1) do
          local sum = valid_blanks_preds[i]:sum()
          if sum ~= 0 then
            valid_blanks_preds[i]:div(sum)
          end
        end
-       print(perplexity(valid_blanks_preds, valid_blanks_index))
+       print('valid_blanks.txt perplexity: '..perplexity(valid_blanks_preds, valid_blanks_index))
      elseif opt.lm == 'wb' then
        alpha = opt.alpha
+       print('alpha='..alpha)
        CM = make_count_matrix(X, Y)
        ngram_size = valid_blanks_X:size(2)+1
        -- run predictions on valid.txt
        valid_preds = predict_witten_bell(valid_X, ngram_size, CM, valid_Y:resize(valid_Y:size(1), 1), vocab_size, alpha)
-       print(valid_preds:narrow(1,1,10))
-       print(valid_Y:resize(valid_Y:size(1), 1):narrow(1,1,10))
-       print(torch.exp(valid_preds:log():mul(-1):mean()))
+       print('valid.txt perplexity: '..torch.exp(valid_preds:log():mul(-1):mean()))
        -- ...and valid_blanks.txt
         valid_blanks_preds = predict_witten_bell(valid_blanks_X, ngram_size, CM, valid_blanks_Q, vocab_size, alpha)
        -- renormalize
@@ -728,7 +728,7 @@ function main()
            valid_blanks_preds[i]:div(sum)
          end
        end
-       print(perplexity(valid_blanks_preds, valid_blanks_index))
+       print('valid_blanks.txt perplexity: '..perplexity(valid_blanks_preds, valid_blanks_index))
      elseif opt.lm == 'NNLM' then
        train_model(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
      elseif opt.lm == 'NCE' then
