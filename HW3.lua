@@ -560,6 +560,7 @@ function train_model_NCE(X, Y, valid_X, valid_Y, valid_blanks_X, valid_blanks_Q,
 
           -- forward
           local hid = model:forward(x_in)
+          hid = hid:repeatTensor(K+1, 1)
           local e_out = out_lookup:forward(y_in)
           local b_out = out_bias:forward(y_in)
           local dot_prod = dot:forward({hid, e_out})
