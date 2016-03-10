@@ -38,7 +38,8 @@ We use some specific notation for our count-based models.
 
 Unlike earlier assignments, we are outputting a \emph{distribution} of possibilities given an input $\mathbf{x}$ rather than a \emph{prediction} of the word following $\mathbf{x}$. 
 
-Therefore, we will evaluate by a metric called \emph{perplexity}. 
+Therefore, we will evaluate by a metric called \emph{perplexity}. This is equal to the exponent of the average negative log-likelihood over all of our samples:
+$$e^{-\frac{1}{n}\sum_{i=1}^n \log p(y = y_i | x_i)}$$
 
 \section{Model and Algorithms}
 
@@ -106,10 +107,71 @@ The optimal value for $\delta$ is determined by grid search on a validation set.
 
 \section{Experiments}
 
+\subsection{Count-Based Models}
+
+For our count-based models, we noticed that the perplexity of Laplace smoothing and Witten-Bell smoothing on our validation set were sensitive to the hyperparameter $\alpha$ from a few random tests. Therefore, we did an exhaustive grid-search, running over $\alpha = n \cdot 10^{-k}$ for $1 \leq n \leq 9$ and for several $k$. 
+
+We graph perplexity on the validation set for Laplace smoothing and Witten-Bell smoothing for both bigrams and trigrams. 
+
+Laplace smoothing perplexity is graphed for $\alpha = n \cdot 10^{-k}$ for $k \in \{-4, -3, -2, -1\}$ while Witten-Bell smoothing perplexity is graphed for $\alpha = n \cdot 10^{-k}$ for $k \in \{-4, -3, -2\}$. The data for $k = -1$ is cut off in this case to allow easier visualization, as the perplexity starts to increase very quickly past $\alpha = 0.1$.  
+
+We give the optimal $\alpha$ with their corresponding perplexity in a table below. 
+
+\begin{table}[h]
+  \centering
+  \begin{tabular}{llcc}
+    \toprule
+    Model & N-gram Size & $\alpha$ & Perplexity \\
+    \midrule
+    \textsc{Laplace Smoothing} & 2 & 0.008 & 296.877 \\
+    & 3 & 0.03 & 398.745 \\
+    \textsc{Witten-Bell Smoothing} & 2 & 0.0007 & 215.055 \\
+    & 3 & 0.0006 & 368.696 \\
+    \bottomrule
+  \end{tabular}
+  \label{tab:alpha}
+\end{table}
+
+
+
 \section{Conclusion}
 
+Bye
 
-\bibliographystyle{apalike}
-\bibliography{writeup}
+
+
+\appendix
+
+\section{Figures} 
+
+\begin{figure}[f]
+  \centering
+  \includegraphics{laplace_2grams.png} \caption{Laplace smoothing for bigrams} \label{fig:laplace2}
+\end{figure}
+
+
+\begin{figure}[f]
+  \centering
+  \includegraphics{laplace_3grams.png}
+  \caption{Laplace smoothing for trigrams}
+  \label{fig:laplace3}
+\end{figure}
+
+\begin{figure}[f]
+  \centering
+  \includegraphics{wb_2grams.png}
+  \caption{Witten-Bell smoothing for bigrams}
+  \label{fig:wb2}
+\end{figure}
+
+\begin{figure}[f]
+  \centering
+  \includegraphics{wb_3grams.png}
+  \caption{Witten-Bell smoothing for trigrams}
+  \label{fig:wb3}
+\end{figure}
+
+%\bibliographystyle{apalike}
+%\bibliography{writeup}
 
 \end{document}
