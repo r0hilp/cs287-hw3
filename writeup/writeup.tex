@@ -94,11 +94,11 @@ $$p_{KN}(w_i) = \frac{\text{max}(N(\cdot, w_i)-\delta, 0)}{\sum_{w' \in \mathcal
 
 Then for bigrams, it is defined as 
 
-$$p_{KN}(w_i | w_{i-1}) = \frac{\text{max}(c(w_{i-1}, w_i) - \delta, 0)}{\sum_{w' \in \mathcal{V}} c(w_{i-1}, w')}$$
+$$p_{KN}(w_i | w_{i-1}) = \frac{\text{max}(c(w_{i-1}, w_i) - \delta, 0)}{\sum_{w' \in \mathcal{V}} c(w_{i-1}, w')} + p_{KN}(w_i)$$
 
 Finally, we can define it recursively for general $n$-grams:
 
-$$p_{KN}(w_i | w^{i-1}_{i-n+1}) = \frac{\text{max}(c(w^{i-1}_{i-n+1}, w_i) - \delta, 0)}{\sum_{w' \in \mathcal{V}}c(w^{i-1}_{i-n+1}, w')}$$
+$$p_{KN}(w_i | w^{i-1}_{i-n+1}) = \frac{\text{max}(c(w^{i-1}_{i-n+1}, w_i) - \delta, 0)}{\sum_{w' \in \mathcal{V}}c(w^{i-1}_{i-n+1}, w')} + \frac{\delta N(w^{i-1}_{i-n+1}, \cdot)}{\sum_{w' \in \mathcal{V}} c(w^{i-1}_{i-n+1}, \cdot)}$$
 
 The optimal value for $\delta$ is determined by grid search on a validation set. 
 
