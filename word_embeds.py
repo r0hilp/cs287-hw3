@@ -20,7 +20,7 @@ def get_closest(w, word_to_idx, idx_to_word, embeds):
     e = embeds[word_to_idx[w] - 1]
     dots = []
     for i,r in enumerate(embeds):
-        if i < 50 or idx_to_word[i] == w:
+        if idx_to_word[i] == w or i < 20:
             continue
         dots.append((idx_to_word[i], np.dot(e, r)))
 
