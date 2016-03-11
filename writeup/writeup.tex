@@ -171,9 +171,9 @@ We graph perplexity on the validation set for Laplace smoothing and Witten-Bell 
 
 \begin{figure}
 \centering
-\subfloat[Bigrams]{ \includegraphics[scale=0.33]{laplace_2grams.png} \label{fig:laplace2} }
+\subfloat[Bigrams]{ \includegraphics[scale=0.2]{laplace_2grams.png} \label{fig:laplace2} }
 \hfill
-\subfloat[Trigrams]{ \includegraphics[scale=0.33]{laplace_3grams.png} \label{fig:laplace3} }
+\subfloat[Trigrams]{ \includegraphics[scale=0.2]{laplace_3grams.png} \label{fig:laplace3} }
 \caption{Laplace smoothing.}
 \end{figure}
 
@@ -212,7 +212,17 @@ For normal training on the Bengio model, we used GPU. This allowed us to complet
 
 For NCE, we started training with learning rate $10$, since it seemed to not learn properly with small learning rate. After a few iterations we drop the learning rate to $0.01$. We used the same architecture and set the noise parameter $K = 10$. The timing was quite fast, completing an epoch in about 7 minutes on CPU. Final results are reported in Table~\ref{tab:results}.
 
-%% plot learning curves
+\begin{figure}[h]
+\centering
+\includegraphics[scale=0.5]{nnlm_train}
+\caption{Training curves for NNLM.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[scale=0.5]{nce_train}
+\caption{Training curves for NCE.}
+\end{figure}
 
 Unfortunately, the perplexities seem higher than desired, although the results on Kaggle seem mostly consistent. This could be due to a computational error on our evaluation side.
 
