@@ -206,7 +206,7 @@ We give the optimal $\alpha$ with their corresponding perplexity in a table belo
   \caption{\label{tab:alpha} Best $\alpha$ parameters for count-based models}
 \end{table}
 
-We also implemented Kneser-Ney smoothing as an extension. We optimized the $\delta$ parameter via a linear search in intervals of $0.05$ from $0$ to $1$, graphed below. 
+We also implemented Kneser-Ney smoothing as an extension. We optimized the $\delta$ parameter via a linear search in intervals of $0.05$ from $0$ to $1$ and plotted it in Figures \ref{fig:kn2} and \ref{fig:kn3}. 
 
 \begin{figure}
 \centering
@@ -289,7 +289,7 @@ Next, we projected the word embeddings to 2 dimensions via PCA. Figure~\ref{fig:
 
 \section{Conclusion}
 
-The count-based model results were very surprising. First of all, our Witten-Bell and Kneser-Ney bigram models had lower perplexity than the neural model on the valid set. Second of all, our trigram models universally performed much worse than our bigram models. 
+The count-based model results were very surprising. First of all, our Witten-Bell and Kneser-Ney bigram models had much lower perplexity than the neural model on the valid set. However, they did not perform better on the Kaggle set. Second of all, our models that used data up to trigrams universally performed much worse than our bigram models. This is the opposite of what we expected, since using trigrams would supposedly allow us to encode even more information about the language. 
 
 We found that training NCE properly was difficult and ate up hours on this assignment. In the end, the problem was that NCE trains very slowly, so the initial epochs showed wildly high perplexities for small learning rates. Nonetheless, it definitely gets significant speedups compared to training the full model on CPU. 
 
