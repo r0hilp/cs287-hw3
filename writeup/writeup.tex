@@ -2,6 +2,7 @@
 \documentclass[11pt]{article}
 
 \usepackage{common}
+\usepackage{subfig}
 \title{HW3: Language Modeling}
 \author{Jeffrey Ling \\ jling@college.harvard.edu \and Rohil Prasad \\ prasad01@college.harvard.edu }
 \begin{document}
@@ -38,15 +39,10 @@ We use some specific notation for our count-based models.
 
 Because there are multiple possible ``correct'' words that follow a specific context, it does not make sense to use percent accuracy as a metric. Instead, we use the probability distribution predicted over words and compute the perplexity, a metric derived from the negative log-likelihood (NLL).
 
-<<<<<<< HEAD
-Therefore, we will evaluate by a metric called \emph{perplexity}. This is equal to the exponent of the average negative log-likelihood over all of our samples:
-$$e^{-\frac{1}{n}\sum_{i=1}^n \log p(y = y_i | x_i)}$$
-=======
 Specifically, the NLL is given over the data as
 $$NLL = -\sum_{i=1}^N \log p(w_i | w_{i-1}, \ldots, w_1)$$
 and the perplexity
 $$PPL = \exp(NLL)$$
->>>>>>> be6cc143023ecc3399096460401671bd6c41e181
 
 \section{Model and Algorithms}
 
@@ -153,12 +149,12 @@ Our overall best results across our count-based and neural network models are li
  \toprule
  Model &  & Train & Valid & Blanks\\
  \midrule
- \textsc{MLE (Bigrams)} & & 67.956 & NA & NA \\
- \textsc{MLE (Trigrams)} & & 7.936 & NA & NA \\
- \textsc{Laplace (Bigrams)} & & 96.423 & 296.877 & 4.59 \\
- \textsc{Laplace (Trigrams)} & & 155.409 & 398.745 & 11.86 \\
-\textsc{Witten-Bell (Bigrams)} & & 84.967 & 215.055 & 3.59 \\
-\textsc{Witten-Bell (Trigrams)} & & 24.015 & 368.696 & 5.24 \\
+ \textsc{MLE (Bigrams)} & & 68 & NA & NA \\
+ \textsc{MLE (Trigrams)} & & 8 & NA & NA \\
+ \textsc{Laplace (Bigrams)} & & 96 & 297 & 4.59 \\
+ \textsc{Laplace (Trigrams)} & & 155 & 399 & 11.86 \\
+\textsc{Witten-Bell (Bigrams)} & & 85 & 215 & 3.59 \\
+\textsc{Witten-Bell (Trigrams)} & & 24 & 369 & 5.24 \\
  \textsc{Neural (GPU)} & & 233 & 246 & 3.94\\
  \textsc{Neural (NCE)} & & & 252 & 3.73 \\
  \bottomrule
@@ -168,9 +164,26 @@ Our overall best results across our count-based and neural network models are li
 
 \subsection{Count-Based Models}
 
-For our count-based models, we noticed that the perplexity of Laplace smoothing and Witten-Bell smoothing on our validation set were sensitive to the hyperparameter $\alpha$ from a few random tests. Therefore, we did an exhaustive grid-search, running over $\alpha = n \cdot 10^{-k}$ for $1 \leq n \leq 9$ and for several $k$ on our valid.txt validation set. 
+
+For our count-based models, we noticed that the perplexity of Laplace smoothing and Witten-Bell smoothing on our validation set were sensitive to the hyperparameter $\alpha$. Therefore, we did an exhaustive grid-search, running over $\alpha = n \cdot 10^{-k}$ for $1 \leq n \leq 9$ and for several $k$ on our valid.txt validation set. 
 
 We graph perplexity on the validation set for Laplace smoothing and Witten-Bell smoothing for both bigrams and trigrams. 
+
+\begin{figure}
+\centering
+\subfloat[Bigrams]{ \includegraphics[scale=0.33]{laplace_2grams.png} \label{fig:laplace2} }
+\hfill
+\subfloat[Trigrams]{ \includegraphics[scale=0.33]{laplace_3grams.png} \label{fig:laplace3} }
+\caption{Laplace smoothing.}
+\end{figure}
+
+\begin{figure}
+\centering
+\subfloat[Bigrams]{ \includegraphics[scale=0.33]{wb_2grams.png} \label{fig:wb2} }
+\hfill
+\subfloat[Trigrams] {\includegraphics[scale=0.33]{wb_3grams.png}  \label{fig:wb3} }
+\caption{Witten-Bell smoothing.}
+\end{figure}
 
 Laplace smoothing perplexity is graphed for $\alpha = n \cdot 10^{-k}$ for $k \in \{-4, -3, -2, -1\}$ while Witten-Bell smoothing perplexity is graphed for $\alpha = n \cdot 10^{-k}$ for $k \in \{-4, -3, -2\}$. The data for $k = -1$ is cut off in this case to allow easier visualization, as the perplexity starts to increase very quickly past $\alpha = 0.1$.  
 
@@ -178,14 +191,14 @@ We give the optimal $\alpha$ with their corresponding perplexity in a table belo
 
 \begin{table}[h]
   \centering
-  \begin{tabular}{llcc}
+  \begin{tabular}{lccc}
     \toprule
     Model & N-gram Size & $\alpha$ & Perplexity \\
     \midrule
-    \textsc{Laplace Smoothing} & 2 & 0.008 & 296.877 \\
-    & 3 & 0.03 & 398.745 \\
-    \textsc{Witten-Bell Smoothing} & 2 & 0.0007 & 215.055 \\
-    & 3 & 0.0006 & 368.696 \\
+    \textsc{Laplace Smoothing} & 2 & 0.008 & 297 \\
+    & 3 & 0.03 & 399 \\
+    \textsc{Witten-Bell Smoothing} & 2 & 0.0007 & 215 \\
+    & 3 & 0.0006 & 369 \\
     \bottomrule
   \end{tabular}
   \caption{\label{tab:alpha} Best $\alpha$ parameters for count-based models}
@@ -211,38 +224,7 @@ Unfortunately, the perplexities seem higher than desired, although the results o
 
 The count-based model results were very surprising. First of all, our Witten-Bell bigram model had lower perplexity than the neural model on the valid set. Second of all, our trigram models universally performed much worse than our bigram models. 
 
-We found that training NCE properly was difficult and ate up hours on this assignment. In the end, the problem was that NCE trains very slowly, so the initial epochs showed wildly high perplexities for small learning rates. Nonetheless, it definitely gets significant speedups compared to training the full model on CPU.
-
-\appendix
-
-\section{Figures} 
-
-\begin{figure}[f]
-  \centering
-  \includegraphics{laplace_2grams.png} \caption{Laplace smoothing for bigrams} \label{fig:laplace2}
-\end{figure}
-
-
-\begin{figure}[f]
-  \centering
-  \includegraphics{laplace_3grams.png}
-  \caption{Laplace smoothing for trigrams}
-  \label{fig:laplace3}
-\end{figure}
-
-\begin{figure}[f]
-  \centering
-  \includegraphics{wb_2grams.png}
-  \caption{Witten-Bell smoothing for bigrams}
-  \label{fig:wb2}
-\end{figure}
-
-\begin{figure}[f]
-  \centering
-  \includegraphics{wb_3grams.png}
-  \caption{Witten-Bell smoothing for trigrams}
-  \label{fig:wb3}
-\end{figure}
+We found that training NCE properly was difficult and ate up hours on this assignment. In the end, the problem was that NCE trains very slowly, so the initial epochs showed wildly high perplexities for small learning rates. Nonetheless, it definitely gets significant speedups compared to training the full model on CPU. 
 
 
 %\bibliographystyle{apalike}
