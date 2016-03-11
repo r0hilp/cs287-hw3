@@ -88,7 +88,7 @@ $$1 - \lambda_{w^{i-1}_{i-n+1}} = \frac{N(w^{i-1}_{i-n+1}, \cdot)}{N(w^{i-1}_{i-
 
 \subsubsection{Kneser-Ney Smoothing}
 
-We use a slightly modified version of Kneser-Ney (discussed in stats.stackexchange.com/questions/114863/in-kneser-ney-smoothing-how-are-unseen-words-handled [put into bib]) to account for cases where a unigram is never found. Fix a ``discount parameter'' $0 < \delta < 1$. For unigrams, the equation is:
+We use a slightly modified version of Kneser-Ney to account for cases where a unigram is never found. Fix a ``discount parameter'' $0 < \delta < 1$. For unigrams, the equation is:
 
 $$p_{KN}(w_i) = \frac{\text{max}(N(\cdot, w_i)-\delta, 0)}{\sum_{w' \in \mathcal{V}} N(\cdot, w')} + \frac{\delta}{|\mathcal{V}|}$$
 
@@ -149,16 +149,16 @@ Our overall best results across our count-based and neural network models are li
  \toprule
  Model &  & Train & Valid & Blanks\\
  \midrule
- \textsc{MLE (Bigrams)} & & 68 & NA & NA \\
- \textsc{MLE (Trigrams)} & & 8 & NA & NA \\
+ \textsc{MLE (Bigrams)} & & 68 & - & - \\
+ \textsc{MLE (Trigrams)} & & 8 & - & - \\
  \textsc{Laplace (Bigrams)} & & 96 & 297 & 4.59 \\
  \textsc{Laplace (Trigrams)} & & 155 & 399 & 11.86 \\
 \textsc{Witten-Bell (Bigrams)} & & 85 & 215 & 3.59 \\
 \textsc{Witten-Bell (Trigrams)} & & 24 & 369 & 5.24 \\
-\textsc{Kneser-Ney (Bigrams)} & & & 111 & 3.86 \\
-\textsc{Kneser-Ney (Trigrams)} & & & 188 & 4.52 \\
+\textsc{Kneser-Ney (Bigrams)} & & 66 & 111 & 3.86 \\
+\textsc{Kneser-Ney (Trigrams)} & & 21 & 188 & 4.52 \\
  \textsc{Neural (GPU)} & & 233 & 246 & 3.94\\
- \textsc{Neural (NCE)} & & & 252 & 3.73 \\
+ \textsc{Neural (NCE)} & & - & 252 & 3.73 \\
  \bottomrule
 \end{tabular}
 \caption{\label{tab:results} Perplexities on PTB language modeling.}
@@ -173,9 +173,9 @@ We graph perplexity on the validation set for Laplace smoothing and Witten-Bell 
 
 \begin{figure}
 \centering
-\subfloat[Bigrams]{ \includegraphics[scale=0.2]{laplace_2grams.png} \label{fig:laplace2} }
+\subfloat[Bigrams]{ \includegraphics[scale=0.33]{laplace_2grams.png} \label{fig:laplace2} }
 \hfill
-\subfloat[Trigrams]{ \includegraphics[scale=0.2]{laplace_3grams.png} \label{fig:laplace3} }
+\subfloat[Trigrams]{ \includegraphics[scale=0.33]{laplace_3grams.png} \label{fig:laplace3} }
 \caption{Laplace smoothing.}
 \end{figure}
 
@@ -237,7 +237,7 @@ We trained using SGD with learning rate $0.01$, batch size 32, and stopped train
 
 For normal training on the Bengio model, we used GPU. This allowed us to complete an epoch in about 3 minutes. We compute final perplexities for the train, valid, and valid blanks data, which are reported in Table~\ref{tab:results}.
 
-For NCE, we started training with learning rate $10$, since it seemed to not learn properly with small learning rate. After a few iterations we drop the learning rate to $0.01$. We used the same architecture and set the noise parameter $K = 10$. The timing was quite fast, completing an epoch in about 7 minutes on CPU. Final results are reported in Table~\ref{tab:results}.
+For NCE, we started training with learning rate $10$, since it seemed to learn too slowly with small learning rate. After a few iterations we drop the learning rate to $0.01$. We used the same basic architecture and set the noise parameter $K = 10$. The timing was quite fast, completing an epoch in about 7 minutes on CPU. Final results are reported in Table~\ref{tab:results}.
 
 \begin{figure}[h]
 \centering
@@ -251,7 +251,7 @@ For NCE, we started training with learning rate $10$, since it seemed to not lea
 \caption{Training curves for NCE.}
 \end{figure}
 
-Unfortunately, the perplexities seem higher than desired, although the results on Kaggle seem mostly consistent. This could be due to a computational error on our evaluation side.
+Unfortunately, the perplexities seem higher than desired, although the results on Kaggle seem mostly consistent with others' results. This could be due to a computational error on our evaluation side.
 
 \subsection{Word Embeddings}
 
