@@ -171,9 +171,9 @@ We graph perplexity on the validation set for Laplace smoothing and Witten-Bell 
 
 \begin{figure}
 \centering
-\subfloat[Bigrams]{ \includegraphics[scale=0.33]{laplace_2grams.png} \label{fig:laplace2} }
+\subfloat[Bigrams]{ \includegraphics[scale=0.2]{laplace_2grams.png} \label{fig:laplace2} }
 \hfill
-\subfloat[Trigrams]{ \includegraphics[scale=0.33]{laplace_3grams.png} \label{fig:laplace3} }
+\subfloat[Trigrams]{ \includegraphics[scale=0.2]{laplace_3grams.png} \label{fig:laplace3} }
 \caption{Laplace smoothing.}
 \end{figure}
 
@@ -206,19 +206,59 @@ We give the optimal $\alpha$ with their corresponding perplexity in a table belo
 
 \subsection{Neural network models}
 
-We trained using SGD with learning rate $0.01$, batch size 32, and stopped training when perplexity on the validation set stopped decreasing. We used word embedding size $d_{in} = 50$ and hidden layer size $d_{hid} = 100$. The models used a context size of 5 words.
+We trained using SGD with learning rate $0.01$, batch size 32, and stopped training when perplexity on the validation set stopped decreasing. We used word embedding size $d_{in} = 50$ and hidden layer size $d_{hid} = 100$. The models used a context size of 5 words. For regularization, we renormalized the word embeddings to have norm 1 after each batch.
 
 For normal training on the Bengio model, we used GPU. This allowed us to complete an epoch in about 3 minutes. We compute final perplexities for the train, valid, and valid blanks data, which are reported in Table~\ref{tab:results}.
 
 For NCE, we started training with learning rate $10$, since it seemed to not learn properly with small learning rate. After a few iterations we drop the learning rate to $0.01$. We used the same architecture and set the noise parameter $K = 10$. The timing was quite fast, completing an epoch in about 7 minutes on CPU. Final results are reported in Table~\ref{tab:results}.
 
-%% plot learning curves
+\begin{figure}[h]
+\centering
+\includegraphics[scale=0.5]{nnlm_train}
+\caption{Training curves for NNLM.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[scale=0.5]{nce_train}
+\caption{Training curves for NCE.}
+\end{figure}
 
 Unfortunately, the perplexities seem higher than desired, although the results on Kaggle seem mostly consistent. This could be due to a computational error on our evaluation side.
 
 \subsection{Word Embeddings}
 
-%% TODO
+We examined some of the word embeddings produced from training the model. 
+
+We chose some words and found the 10 closest words by dot product (equal to cosine similarity, since our word embeddings have norm 1) after throwing out the top 20 most common words. Table~\ref{tab:close} shows some results:
+
+\begin{table}[h]
+  \centering
+  \begin{tabular}{c|c|c|c}
+    october & stock & leaders & york  \\
+    \midrule
+nov. & interest & we & cents \\
+july & share & you & million \\
+yield & junk & i & during \\
+months & last & there & share \\
+index & program & president  & nine \\
+since & composite & they & billion \\
+oct. & treasury & people & london \\
+sept. & bond & officials & new \\ 
+dec. & exchange & he & nasdaq \\
+year & over-the-counter & n't & federal
+  \end{tabular}
+  \caption{10 closest words by dot product.}\label{tab:close} 
+\end{table}
+
+Next, we projected the word embeddings to 2 dimensions via PCA. Figure~\ref{fig:PCA} shows the subset of months and stock related words. There is some interesting separation between the months and market-related words.
+
+\begin{figure}[H]
+\centering
+\includegraphics[scale=0.5]{pca}
+\caption{PCA of word embeddings.}
+\label{fig:PCA}
+\end{figure}
 
 \section{Conclusion}
 
