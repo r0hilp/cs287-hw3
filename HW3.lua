@@ -24,6 +24,8 @@ cmd:option('-has_blanks', 1, 'use blanks data for valid')
 -- Hyperparameters
 cmd:option('-alpha', 0.1, 'laplace smoothing alpha')
 
+cmd:option('-delta', 1, 'kneser-ney smoothing delta')
+
 cmd:option('-eta', 0.01, 'learning rate for SGD')
 cmd:option('-batch_size', 32, 'batch size for SGD')
 cmd:option('-max_epochs', 20, 'max # of epochs for SGD')
@@ -187,51 +189,66 @@ function predict_witten_bell(X, ngram_size, CM, queries, vocab_size, alpha)
   return preds
 end
 
-function predict_kneser_ney(X, bigram_CM, trigram_CM, queries, vocab_size, alpha, delta, renormalize)
+function predict_kneser_ney(X, ngram_size, CM, queries, vocab_size, delta)
   -- Predict distribution of the word following X[i] over queries[i]
   local preds = torch.zeros(X:size(1), queries:size(2))
 
-  -- Get p(w_i)
-  local unigram_preds = torch.zeros(vocab_size)
-  for word = 1, vocab_size do
-    for bigram, suffixes in pairs(bigram_CM) do
-      if suffixes[word] ~= nil then
-        unigram_preds[word] = unigram_preds[word] + 1
+  if ngram_size == 2 then
+    local unigram_preds = torch.zeros(vocab_size)
+    for bigram, suffixes in pairs(CM) do
+      for suffix, count in pairs(suffixes) do
+        unigram_preds[suffix] = unigram_preds[suffix] + 1
       end
     end
-  end
+    local unigram_preds_sum = unigram_preds:sum()
+    -- interpolate unigrams to correct for unseen words
+    for i = 1, vocab_size do
+      unigram_preds[i] = math.max(unigram_preds[i] - delta, 0) / unigram_preds_sum + delta / vocab_size
+    end
 
-  -- Get bigram pred
-  for i = 1, X:size(1) do
-    prefix = hash(X[i]) % vocab_size^2
-    for j = 1, queries:size(2) do
-      if bigram_CM[prefix] == nil then
-        if renormalize == true then
-          preds[i]:fill(1/queries:size(2))
+    -- Get bigram pred
+    for i = 1, X:size(1) do
+      prefix = hash(X[i]) % vocab_size^2
+      if CM[prefix] ~= nil then
+        for j = 1, queries:size(2) do
+          if CM[prefix][queries[i][j]] ~= nil then
+            preds[i][j] = math.max(CM[prefix][queries[i][j]] - delta, 0) / tblsum(CM[prefix])
+          end
+          preds[i][j] = preds[i][j] + unigram_preds[queries[i][j]]
         end
       else
-        if bigram_CM[prefix][queries[i][j]] ~= nil then
-          preds[i][j] = math.max(bigram_CM[prefix][queries[i][j]] - delta, 0) / tblsum(bigram_CM[prefix])
+        for j = 1, queries:size(2) do
+          preds[i][j] = unigram_preds[queries[i][j]]
         end
-        preds[i][j] = preds[i][j] + unigram_preds[queries[i][j]]
       end
     end
-  end
-
-  -- Get trigram pred
-  if X:size(2) == 2 then
+  else
+    local X_prev = X[{ {},{2, X:size(2)} }]
+    local CM_prev = {}
+    for key, value in pairs(CM) do
+      CM_prev[ key % (vocab_size ^ (ngram_size - 2)) ] = value
+    end
+    local previous_preds = predict_kneser_ney(X_prev, ngram_size-1, CM_prev, queries, vocab_size, delta)
     for i = 1, X:size(1) do
-      prefix = hash(X[i])
-      for j = 1, queries:size(2) do
-        if trigram_CM[prefix] == nil then
-          if renormalize == true then
-            
+      local prefix = hash(X[i])
+      if CM[prefix] ~= nil then
+        local unique_suffixes = tbllength(CM[prefix])
+        local total_suffix_number = tblsum(CM[prefix])
+        local backoff_probability = delta * unique_suffixes / total_suffix_number
+        for j = 1, queries:size(2) do
+          if CM[prefix][queries[i][j]] ~= nil then
+            preds[i][j] = math.max(CM[prefix][queries[i][j]] - delta, 0) / tblsum(CM[prefix]) + backoff_probability* previous_preds[i][j]
+          else
+            preds[i][j] = backoff_probability*previous_preds[i][j]
           end
         end
+      else
+        preds[i] = previous_preds[i]
       end
     end
-  end
 
+  end
+  return preds
 end
 
 function perplexity(preds, Y)
@@ -664,6 +681,8 @@ function main()
          end
        end
        print(perplexity(valid_blanks_preds, valid_blanks_index))
+       train_preds = predict_laplace(X, CM, Y:resize(Y:size(1), 1), vocab_size, 0)
+       print('train.txt perplexity: '..torch.exp(train_preds:log():mul(-1):mean()))
      elseif opt.lm == 'laplace' then
        alpha = opt.alpha
        print('alpha='..alpha)
@@ -681,11 +700,13 @@ function main()
          end
        end
        print('valid_blanks.txt perplexity: '..perplexity(valid_blanks_preds, valid_blanks_index))
+       train_preds = predict_laplace(X, CM, Y:resize(Y:size(1), 1), vocab_size, alpha)
+       print('train.txt perplexity: '..torch.exp(train_preds:log():mul(-1):mean()))
      elseif opt.lm == 'wb' then
-       alpha = opt.alpha
+       local alpha = opt.alpha
        print('alpha='..alpha)
-       CM = make_count_matrix(X, Y)
-       ngram_size = valid_blanks_X:size(2)+1
+       local CM = make_count_matrix(X, Y)
+       local ngram_size = valid_blanks_X:size(2)+1
        -- run predictions on valid.txt
        valid_preds = predict_witten_bell(valid_X, ngram_size, CM, valid_Y:resize(valid_Y:size(1), 1), vocab_size, alpha)
        print('valid.txt perplexity: '..torch.exp(valid_preds:log():mul(-1):mean()))
@@ -699,6 +720,28 @@ function main()
          end
        end
        print('valid_blanks.txt perplexity: '..perplexity(valid_blanks_preds, valid_blanks_index))
+       train_preds = predict_witten_bell(X, ngram_size, CM, Y:resize(Y:size(1), 1), vocab_size, alpha)
+       print('train.txt perplexity: '..torch.exp(train_preds:log():mul(-1):mean()))
+     elseif opt.lm == 'kn' then
+       local delta = opt.delta
+       local CM = make_count_matrix(X, Y)
+       local ngram_size = valid_X:size(2)+1
+       print('delta='..delta)
+      -- run predictions on valid.txt
+       valid_preds = predict_kneser_ney(valid_X, ngram_size, CM, valid_Y:resize(valid_Y:size(1), 1), vocab_size, delta)
+       print('valid.txt perplexity: '..torch.exp(valid_preds:log():mul(-1):mean()))
+       -- ...and valid_blanks.txt
+        valid_blanks_preds = predict_kneser_ney(valid_blanks_X, ngram_size, CM, valid_blanks_Q, vocab_size, delta)
+       -- renormalize
+       for i = 1, valid_blanks_preds:size(1) do
+         local sum = valid_blanks_preds[i]:sum()
+         if sum ~= 0 then
+           valid_blanks_preds[i]:div(sum)
+         end
+       end
+       print('valid_blanks.txt perplexity: '..perplexity(valid_blanks_preds, valid_blanks_index))
+       -- train_preds = predict_kneser_ney(X, ngram_size, CM, Y:resize(Y:size(1), 1), vocab_size, delta)
+       -- print('train.txt perplexity: '..torch.exp(train_preds:log():mul(-1):mean()))
      elseif opt.lm == 'NNLM' then
        train_model(X_context, Y, valid_X_context, valid_Y, valid_blanks_X_context, valid_blanks_Q, valid_blanks_Y, valid_blanks_index)
      elseif opt.lm == 'NCE' then
@@ -717,40 +760,68 @@ function main()
    if opt.action == 'test' then
      print('Testing...')
      local test_model
-     if opt.lm == 'NCE' then
-       test_model = nn.Sequential()
-       test_model:add(torch.load(opt.test_model).model)
-
-       local out_lookup = torch.load(opt.test_model).out_lookup
-       local out_bias = torch.load(opt.test_model).out_bias
-       local lin = nn.Linear(opt.hidden, vocab_size)
-       lin.weight = out_lookup.weight
-       lin.bias = out_bias.weight
-       test_model:add(lin)
-     elseif opt.lm == 'NNLM' then
-         test_model = torch.load(opt.test_model).model
-     end
-
-     local scores = test_model:forward(test_X_context)
-     local preds = torch.Tensor(test_X_context:size(1), test_X_queries:size(2))
-     f = io.open('PTB_pred_NCE.test', 'w')
-     local out = {"ID"}
-     for i = 1, test_X_queries:size(2) do
-        table.insert(out, "Class"..i)
-     end
-     f:write(table.concat(out, ","))
-     f:write("\n")
-     for i = 1, test_X_context:size(1) do
-        out = {i}
-        preds[i] = nn.LogSoftMax():forward(scores[i]:index(1, test_X_queries[i]))
-        preds[i]:exp()
-        for j = 1, test_X_queries:size(2) do
-          table.insert(out, preds[i][j])
+    if opt.lm == 'kn' then
+      local ngram_size = test_X:size(2) + 1
+      local CM = make_count_matrix(X, Y)
+      local delta = opt.delta
+      local test_blanks_preds = predict_kneser_ney(test_X, ngram_size, CM, test_X_queries, vocab_size, delta)
+      for i = 1, test_blanks_preds:size(1) do
+        local sum = test_blanks_preds[i]:sum()
+        if sum ~= 0 then
+          test_blanks_preds[i]:div(sum)
         end
-        f:write(table.concat(out, ","))
-        f:write("\n")
-     end
-   end
+      end
+      f = io.open("PTB_pred_KN.test", 'w')
+      local out = {"ID"}
+      for i = 1, test_X_queries:size(2) do
+          table.insert(out, "Class"..i)
+      end
+      f:write(table.concat(out, ","))
+      f:write("\n")
+      for i = 1, test_X_context:size(1) do
+          out = {i}
+          for j = 1, test_X_queries:size(2) do
+            table.insert(out, test_blanks_preds[i][j])
+          end
+          f:write(table.concat(out, ","))
+          f:write("\n")
+      end
+    else
+      if opt.lm == 'NCE' then
+        test_model = nn.Sequential()
+        test_model:add(torch.load(opt.test_model).model)
+  
+        local out_lookup = torch.load(opt.test_model).out_lookup
+        local out_bias = torch.load(opt.test_model).out_bias
+        local lin = nn.Linear(opt.hidden, vocab_size)
+        lin.weight = out_lookup.weight
+        lin.bias = out_bias.weight
+        test_model:add(lin)
+      elseif opt.lm == 'NNLM' then
+          test_model = torch.load(opt.test_model).model
+      end
+
+      local scores = test_model:forward(test_X_context)
+      local preds = torch.Tensor(test_X_context:size(1), test_X_queries:size(2))
+      f = io.open('PTB_pred_NCE.test', 'w')
+      local out = {"ID"}
+      for i = 1, test_X_queries:size(2) do
+          table.insert(out, "Class"..i)
+      end
+      f:write(table.concat(out, ","))
+      f:write("\n")
+      for i = 1, test_X_context:size(1) do
+          out = {i}
+          preds[i] = nn.LogSoftMax():forward(scores[i]:index(1, test_X_queries[i]))
+          preds[i]:exp()
+          for j = 1, test_X_queries:size(2) do
+            table.insert(out, preds[i][j])
+          end
+          f:write(table.concat(out, ","))
+          f:write("\n")
+      end
+    end
+  end
 
    if opt.action == 'export' then
      local model = torch.load(opt.test_model).model
